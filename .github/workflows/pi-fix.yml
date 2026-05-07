@@ -521,7 +521,8 @@ jobs:
           else
             gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$message"
           fi
-          exit 1
+          echo '{"status":"diagnostic","reason":"No pull request was created."}' > "$PI_FIX_RESULT_FILE"
+          cat "$PI_FIX_RESULT_FILE"
 
       - name: Upload Pi fix event transcript
         if: always() && steps.request.outputs.should_run == 'true'
