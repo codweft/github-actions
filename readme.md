@@ -74,6 +74,35 @@ For pull request targets, `pi-fix` also loads unresolved, non-outdated review
 threads through GitHub GraphQL. Commands such as `/pi-fix fix all unresolved
 review threads` use that structured thread context as the primary source.
 
+### `pi-implement`
+
+Reusable workflow that lets trusted repository users ask Pi to implement a full
+issue with `/pi-implement` or by adding the `ready-for-pi` label.
+
+The workflow asks clarifying questions when the issue is not ready. When the
+issue is clear, it creates a draft pull request, implements the issue, marks the
+pull request ready, and comments `/pi-review` on the generated pull request.
+
+Caller workflow:
+
+```yaml
+jobs:
+  implement:
+    uses: leynier/github-actions/.github/workflows/pi-implement.yml@main
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+    with:
+      issue_number: ${{ github.event.inputs.issue_number || '' }}
+      instruction: ${{ github.event.inputs.instruction || '' }}
+    secrets:
+      KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+      ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+      MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+```
+
 ### `pi-resolve-conflicts`
 
 Reusable workflow that lets trusted repository users request an automated merge
