@@ -10,7 +10,11 @@ on:
         default: ""
     secrets:
       KIMI_API_KEY:
-        required: true
+        required: false
+      ZAI_API_KEY:
+        required: false
+      MINIMAX_API_KEY:
+        required: false
 
 jobs:
   review:
@@ -81,6 +85,8 @@ jobs:
       - name: Run Pi review
         env:
           KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
@@ -200,17 +206,32 @@ jobs:
           RUN_PI="$RUNNER_TEMP/run-pi.sh"
           cat > "$RUN_PI" <<'EOS'
           #!/usr/bin/env bash
-          exec pi --mode json --provider kimi-coding --model kimi-for-coding "$(cat "$1")"
+          exec pi --mode json --provider "$2" --model "$3" "$(cat "$1")"
           EOS
           chmod +x "$RUN_PI"
 
-          # `script` allocates a pseudo-TTY so pi's stdout is line-buffered instead
-          # of block-buffered, which is what makes events appear live in the
-          # Actions log. `-q` quiet, `-e` propagate exit code, `-f` flush per write.
-          # `jq --unbuffered` ensures jq also flushes per output line.
-          script -qefc "$RUN_PI '$PROMPT_FILE'" /dev/null \
-            | tee "$RUNNER_TEMP/pi-events.jsonl" \
-            | jq --unbuffered -j '
+          EVENTS_FILE="$RUNNER_TEMP/pi-events.jsonl"
+          : > "$EVENTS_FILE"
+
+          run_pi_with_model() {
+            local provider="$1"
+            local model="$2"
+            local secret_name="$3"
+            local secret_value="${!secret_name:-}"
+
+            if [ -z "$secret_value" ]; then
+              echo "Skipping ${provider}/${model} because ${secret_name} is not configured"
+              return 2
+            fi
+
+            echo "Trying ${provider}/${model}"
+            set +e
+            # `script` allocates a pseudo-TTY so pi's stdout is line-buffered
+            # instead of block-buffered, which is what makes events appear live in
+            # the Actions log. `jq --unbuffered` also flushes per output line.
+            script -qefc "$RUN_PI '$PROMPT_FILE' '$provider' '$model'" /dev/null \
+              | tee -a "$EVENTS_FILE" \
+              | jq --unbuffered -j '
                 def short($n): tostring | gsub("\\s+"; " ")
                   | if length > $n then .[0:$n] + "…" else . end;
                 def args_summary:
@@ -267,6 +288,43 @@ jobs:
 
                   else empty end
               '
+            local pi_status=${PIPESTATUS[0]}
+            set +e
+
+            if [ "$pi_status" -eq 0 ]; then
+              echo "Pi completed with ${provider}/${model}"
+              return 0
+            fi
+
+            echo "Pi failed with ${provider}/${model} (exit ${pi_status}); trying next configured model"
+            return "$pi_status"
+          }
+
+          configured_models=0
+
+          for candidate in \
+            "kimi-coding|kimi-for-coding|KIMI_API_KEY" \
+            "zai|glm-5.1|ZAI_API_KEY" \
+            "minimax|MiniMax-M2.7|MINIMAX_API_KEY"
+          do
+            IFS='|' read -r provider model secret_name <<< "$candidate"
+            if [ -n "${!secret_name:-}" ]; then
+              configured_models=$((configured_models + 1))
+            fi
+
+            run_pi_with_model "$provider" "$model" "$secret_name"
+            status=$?
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
+          done
+
+          if [ "$configured_models" -eq 0 ]; then
+            echo "No Pi model API keys are configured. Configure at least one of KIMI_API_KEY, ZAI_API_KEY, or MINIMAX_API_KEY." >&2
+          else
+            echo "All configured Pi models failed." >&2
+          fi
+          exit 1
 
       - name: Upload Pi event transcript
         if: always()
