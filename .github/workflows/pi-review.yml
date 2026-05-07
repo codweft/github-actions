@@ -1,0 +1,277 @@
+name: pi-review
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        description: "Pull request number to review for manual callers"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      KIMI_API_KEY:
+        required: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Resolve PR context
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "$INPUT_PR_NUMBER" ]; then
+            pr_number="$INPUT_PR_NUMBER"
+            data=$(gh pr view "$pr_number" --json headRefOid,baseRefOid)
+            echo "number=$pr_number" >> "$GITHUB_OUTPUT"
+            echo "head_sha=$(echo "$data" | jq -r .headRefOid)" >> "$GITHUB_OUTPUT"
+            echo "base_sha=$(echo "$data" | jq -r .baseRefOid)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          case "${{ github.event_name }}" in
+            pull_request)
+              echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+              echo "head_sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+              echo "base_sha=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+              ;;
+            issue_comment)
+              pr_number="${{ github.event.issue.number }}"
+              data=$(gh pr view "$pr_number" --json headRefOid,baseRefOid)
+              echo "number=$pr_number" >> "$GITHUB_OUTPUT"
+              echo "head_sha=$(echo "$data" | jq -r .headRefOid)" >> "$GITHUB_OUTPUT"
+              echo "base_sha=$(echo "$data" | jq -r .baseRefOid)" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unsupported event '${{ github.event_name }}'. Pass pr_number from the caller workflow." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: React to trigger comment
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content="eyes" || true
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ steps.pr.outputs.head_sha }}
+
+      - name: Install Pi Coding Agent
+        run: curl -fsSL https://pi.dev/install.sh | sh
+
+      - name: Run Pi review
+        env:
+          KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PR_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          PR_BASE_SHA: ${{ steps.pr.outputs.base_sha }}
+        run: |
+          export PATH="$HOME/.pi/bin:$PATH"
+          set -o pipefail
+
+          # Persist the prompt to a file so the script-wrapper below can read it
+          # without re-escaping a heredoc inside `script -c`.
+          PROMPT_FILE="$RUNNER_TEMP/pi-prompt.txt"
+          cat > "$PROMPT_FILE" <<'PROMPT'
+          You are acting as a reviewer for a proposed code change in a GitHub Pull Request.
+
+          All output you produce — comments, summaries, findings — MUST be written in English.
+
+          ============================================================
+          STEP 1 — Announce the review has started
+          ============================================================
+          Before doing anything else, post a single PR-level comment so the author knows
+          the automated review is in progress. Use:
+
+            gh pr comment "$PR_NUMBER" --body "🔍 Starting automated review of this pull request..."
+
+          ============================================================
+          STEP 2 — Read the diff and the PR description
+          ============================================================
+          Inspect the changes introduced by this PR. Useful commands:
+
+            gh pr diff "$PR_NUMBER"
+            git diff "$PR_BASE_SHA".."$PR_HEAD_SHA"
+            gh pr view "$PR_NUMBER" --json files,title,body,closingIssuesReferences
+
+          Only consider code that was added or modified in this PR. Do not flag
+          pre-existing issues that are not touched by the diff.
+
+          ============================================================
+          STEP 2b — Load context from linked issues (if any)
+          ============================================================
+          Use `closingIssuesReferences` from the gh pr view output to discover linked
+          issues; fall back to scanning the PR title/body for `#NNN` references.
+          For each, fetch with:
+
+            gh issue view "$ISSUE_NUMBER" --json number,title,body,labels,state
+
+          If the diff clearly does NOT address the linked issue's stated requirement,
+          flag that as a [P1] or [P2] finding. If no linked issue is found, skip
+          silently — do not invent context, do not mention the absence.
+
+          ============================================================
+          STEP 3 — Apply the review guidelines
+          ============================================================
+          Flag an issue only if ALL of these hold:
+            1. It meaningfully impacts correctness, performance, security, or maintainability.
+            2. The issue is discrete and actionable.
+            3. Fixing it does not demand more rigor than the rest of the codebase already shows.
+            4. It was introduced by THIS PR (not pre-existing).
+            5. The author would likely fix it if they were aware of it.
+            6. It does not rely on unstated assumptions about intent.
+            7. You can point to concrete code that is provably affected — no speculation.
+            8. It is clearly not an intentional change.
+
+          Look for: logic bugs, null/exception handling, race/order issues, security
+          (injection, missing validation, leaked secrets, missing authorization),
+          resource leaks, breaking changes to public contracts without migration,
+          type errors / unsafe casts.
+
+          Do NOT flag style, formatting, naming, refactor nits, typos in comments,
+          documentation polish, or issues not provably caused by the diff.
+
+          ============================================================
+          STEP 4 — Post one review comment per finding
+          ============================================================
+          Group all findings into a SINGLE pull request review:
+
+            gh api \
+              --method POST \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews" \
+              -f commit_id="$PR_HEAD_SHA" \
+              -f event="COMMENT" \
+              -f body="<overall summary>" \
+              -F 'comments[][path]=<file path>' \
+              -F 'comments[][line]=<line number>' \
+              -F 'comments[][side]=RIGHT' \
+              -F 'comments[][body]=<finding body>'
+
+          (Repeat the four `comments[][...]` flags for each finding.)
+
+          Each finding MUST start with a priority tag [P0]/[P1]/[P2]/[P3], be one
+          short paragraph (no internal line breaks), explain WHY it is a bug citing
+          the affected code, mention the scenario/inputs to trigger it, stay
+          matter-of-fact (no flattery, no accusation), and use ```suggestion blocks
+          ONLY for concrete replacement code preserving original whitespace.
+
+          ============================================================
+          STEP 5 — Post the closing summary comment
+          ============================================================
+          If you posted at least one finding:
+
+            gh pr comment "$PR_NUMBER" --body "✅ Review complete. Found N issue(s):
+            - [P1] <title>
+            - [P2] <title>
+            Overall: patch needs changes."
+
+          If you found NO issues:
+
+            gh pr comment "$PR_NUMBER" --body "✅ Review complete. No issues were found in this pull request."
+
+          Do not post duplicate summaries. Do not wrap output in JSON. Do not include
+          any text outside of these comments.
+          PROMPT
+
+          # Wrapper script: load the prompt and exec pi. Defined as a file so the
+          # `script` invocation below stays a one-liner.
+          RUN_PI="$RUNNER_TEMP/run-pi.sh"
+          cat > "$RUN_PI" <<'EOS'
+          #!/usr/bin/env bash
+          exec pi --mode json --provider kimi-coding --model kimi-for-coding "$(cat "$1")"
+          EOS
+          chmod +x "$RUN_PI"
+
+          # `script` allocates a pseudo-TTY so pi's stdout is line-buffered instead
+          # of block-buffered, which is what makes events appear live in the
+          # Actions log. `-q` quiet, `-e` propagate exit code, `-f` flush per write.
+          # `jq --unbuffered` ensures jq also flushes per output line.
+          script -qefc "$RUN_PI '$PROMPT_FILE'" /dev/null \
+            | tee "$RUNNER_TEMP/pi-events.jsonl" \
+            | jq --unbuffered -j '
+                def short($n): tostring | gsub("\\s+"; " ")
+                  | if length > $n then .[0:$n] + "…" else . end;
+                def args_summary:
+                  . as $a |
+                  if   $a.command   then "$ " + ($a.command   | short(240))
+                  elif $a.cmd       then "$ " + ($a.cmd       | short(240))
+                  elif $a.file_path then $a.file_path
+                  elif $a.path      then $a.path
+                  elif $a.file      then $a.file
+                  elif $a.url       then $a.url
+                  else ($a | tostring | short(240)) end;
+
+                . as $e |
+                  if   $e.type == "session"
+                       then "\n[session] cwd=\($e.cwd) v=\($e.version)\n"
+                  elif $e.type == "agent_start"
+                       then "[agent] start\n"
+                  elif $e.type == "agent_end"
+                       then "\n[agent] done\n"
+                  elif $e.type == "turn_start"
+                       then "\n──── turn ────\n"
+                  elif $e.type == "turn_end"
+                       or  $e.type == "message_start"
+                       or  $e.type == "message_end"
+                       or  $e.type == "tool_execution_update"
+                       then empty
+
+                  elif $e.type == "tool_execution_start"
+                       then "\n[tool→ \($e.toolName)] " + ($e.args | args_summary) + "\n"
+                  elif $e.type == "tool_execution_end"
+                       then "[tool"
+                            + (if $e.isError then "✗" else "✓" end)
+                            + " \($e.toolName)]"
+                            + ( ($e.result.content // []) | map(.text // "") | join(" ")
+                                | gsub("\\s+"; " ")
+                                | if length > 0
+                                  then " → " + (.[0:200] + (if length > 200 then "…" else "" end))
+                                  else "" end )
+                            + "\n"
+
+                  elif $e.type == "message_update" and $e.assistantMessageEvent.type == "thinking_start"
+                       then "\n[thinking] "
+                  elif $e.type == "message_update" and $e.assistantMessageEvent.type == "thinking_delta"
+                       then $e.assistantMessageEvent.delta
+                  elif $e.type == "message_update" and $e.assistantMessageEvent.type == "text_start"
+                       then "\n[assistant] "
+                  elif $e.type == "message_update" and $e.assistantMessageEvent.type == "text_delta"
+                       then $e.assistantMessageEvent.delta
+
+                  elif $e.type == "auto_retry_start"
+                       then "\n[retry] start (\($e.reason // "?"))\n"
+                  elif $e.type == "auto_retry_end"
+                       then "[retry] end\n"
+
+                  else empty end
+              '
+
+      - name: Upload Pi event transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-events-${{ steps.pr.outputs.number }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pi-events.jsonl
+          if-no-files-found: ignore
