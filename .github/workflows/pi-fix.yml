@@ -48,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          default_branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+          default_branch=$(gh repo view "$GITHUB_REPOSITORY" --json defaultBranchRef --jq '.defaultBranchRef.name')
           trusted=false
           target_kind=""
           issue_number=""
@@ -108,7 +108,7 @@ jobs:
           esac
 
           if [ "$target_kind" = "pull_request" ]; then
-            pr_data=$(gh pr view "$pr_number" --json headRepository,headRefName,baseRefName,url)
+            pr_data=$(gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" --json headRepository,headRefName,baseRefName,url)
             head_repo=$(echo "$pr_data" | jq -r '.headRepository.nameWithOwner')
             head_ref=$(echo "$pr_data" | jq -r '.headRefName')
             base_ref=$(echo "$pr_data" | jq -r '.baseRefName')
@@ -163,9 +163,9 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$TARGET_KIND" = "pull_request" ]; then
-            gh pr comment "$ISSUE_NUMBER" --body "$MESSAGE"
+            gh pr comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$MESSAGE"
           else
-            gh issue comment "$ISSUE_NUMBER" --body "$MESSAGE"
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$MESSAGE"
           fi
 
       - name: React to trigger comment
@@ -237,7 +237,7 @@ jobs:
             {
               echo "## Pull Request"
               echo
-              gh pr view "$PR_NUMBER" --json number,title,body,author,baseRefName,headRefName,url,files,comments
+              gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json number,title,body,author,baseRefName,headRefName,url,files,comments
               echo
               echo "## Pull Request Review Comments"
               echo
@@ -247,7 +247,7 @@ jobs:
             {
               echo "## Issue"
               echo
-              gh issue view "$ISSUE_NUMBER" --json number,title,body,author,labels,state,url,comments
+              gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json number,title,body,author,labels,state,url,comments
             } >> "$CONTEXT_FILE"
           fi
 
@@ -307,8 +307,8 @@ jobs:
             step needed from a human.
 
           GitHub commands:
-          - Use `gh issue comment "$ISSUE_NUMBER"` for issues.
-          - Use `gh pr comment "$PR_NUMBER"` for pull requests.
+          - Use `gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"` for issues.
+          - Use `gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"` for pull requests.
           - Use `gh pr create --base "$PR_BASE" --head "$BRANCH_NAME"` to open the PR.
           - Include the source URL from SOURCE_URL in the generated PR body.
 
@@ -398,7 +398,7 @@ jobs:
             exit 0
           fi
 
-          existing_pr=$(gh pr list --head "$BRANCH_NAME" --json url --jq '.[0].url // ""')
+          existing_pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH_NAME" --json url --jq '.[0].url // ""')
           if [ -n "$existing_pr" ]; then
             echo "{\"status\":\"pr-created\",\"url\":\"$existing_pr\"}" > "$PI_FIX_RESULT_FILE"
             cat "$PI_FIX_RESULT_FILE"
@@ -407,9 +407,9 @@ jobs:
 
           message="Pi fix finished without creating a pull request or diagnostic. Please inspect this workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           if [ "$TARGET_KIND" = "pull_request" ]; then
-            gh pr comment "$PR_NUMBER" --body "$message"
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$message"
           else
-            gh issue comment "$ISSUE_NUMBER" --body "$message"
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$message"
           fi
           exit 1
 
