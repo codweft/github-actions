@@ -93,7 +93,7 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
-      actions: read
+      actions: write
     with:
       issue_number: ${{ github.event.inputs.issue_number || '' }}
       instruction: ${{ github.event.inputs.instruction || '' }}

@@ -28,7 +28,7 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
-      actions: read
+      actions: write
     steps:
       - name: Resolve request
         id: request
@@ -435,6 +435,31 @@ jobs:
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$message"
           echo '{"status":"diagnostic","reason":"No pull request was created."}' > "$PI_IMPLEMENT_RESULT_FILE"
           cat "$PI_IMPLEMENT_RESULT_FILE"
+
+      - name: Trigger Pi review for ready PR
+        if: steps.request.outputs.should_run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_BASE: ${{ steps.request.outputs.pr_base }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "$PI_IMPLEMENT_RESULT_FILE" ]; then
+            exit 0
+          fi
+
+          status=$(jq -r '.status // ""' "$PI_IMPLEMENT_RESULT_FILE")
+          if [ "$status" != "pr-ready" ]; then
+            exit 0
+          fi
+
+          url=$(jq -r '.url // ""' "$PI_IMPLEMENT_RESULT_FILE")
+          if [ -z "$url" ] || [ "$url" = "null" ]; then
+            exit 0
+          fi
+
+          pr_number="${url##*/}"
+          gh pr comment "$pr_number" --repo "$GITHUB_REPOSITORY" --body "/pi-review" || true
+          gh workflow run pi-review.yml --repo "$GITHUB_REPOSITORY" --ref "$PR_BASE" -f pr_number="$pr_number"
 
       - name: Upload Pi implement event transcript
         if: always() && steps.request.outputs.should_run == 'true'
