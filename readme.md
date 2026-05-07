@@ -52,3 +52,7 @@ jobs:
 
 The caller repository must define `KIMI_API_KEY`. The workflow only honors
 comment-triggered requests from owners, members, or collaborators.
+
+For pull request targets, `pi-fix` also loads unresolved, non-outdated review
+threads through GitHub GraphQL. Commands such as `/pi-fix fix all unresolved
+review threads` use that structured thread context as the primary source.

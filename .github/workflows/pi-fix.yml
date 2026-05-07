@@ -205,6 +205,7 @@ jobs:
           git switch -c "$BRANCH_NAME"
 
       - name: Build request context
+        id: context
         if: steps.request.outputs.should_run == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -217,6 +218,7 @@ jobs:
           BRANCH_NAME: ${{ steps.request.outputs.branch_name }}
         run: |
           set -euo pipefail
+          run_agent=true
           CONTEXT_FILE="$RUNNER_TEMP/pi-fix-context.md"
           {
             echo "# Pi Fix Context"
@@ -234,15 +236,115 @@ jobs:
           } > "$CONTEXT_FILE"
 
           if [ "$TARGET_KIND" = "pull_request" ]; then
+            repo_owner="${GITHUB_REPOSITORY%%/*}"
+            repo_name="${GITHUB_REPOSITORY#*/}"
+            lower_command=$(printf '%s' "$COMMAND_BODY" | tr '[:upper:]' '[:lower:]')
+            fix_unresolved_mode=false
+            case "$lower_command" in
+              *"all unresolved"*|*"todos"*|*"review comments"*|*"review threads"*|*"unresolved review"*|*"hilos no resueltos"*)
+                fix_unresolved_mode=true
+                ;;
+            esac
+
+            threads_json="$RUNNER_TEMP/pi-fix-review-threads.json"
+            gh api graphql \
+              -f owner="$repo_owner" \
+              -f repo="$repo_name" \
+              -F number="$PR_NUMBER" \
+              -f query='
+                query($owner:String!, $repo:String!, $number:Int!) {
+                  repository(owner:$owner, name:$repo) {
+                    pullRequest(number:$number) {
+                      reviewThreads(first: 100) {
+                        nodes {
+                          id
+                          isResolved
+                          isOutdated
+                          path
+                          line
+                          originalLine
+                          startLine
+                          diffSide
+                          comments(first: 50) {
+                            nodes {
+                              id
+                              body
+                              author { login }
+                              createdAt
+                              url
+                              path
+                              line
+                              originalLine
+                              diffHunk
+                              pullRequestReview { state }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }' > "$threads_json"
+
+            unresolved_count=$(jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false and .isOutdated == false)] | length' "$threads_json")
+
             {
               echo "## Pull Request"
               echo
               gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json number,title,body,author,baseRefName,headRefName,url,files,comments
               echo
+              echo "## Unresolved Review Threads"
+              echo
+              echo "Count: ${unresolved_count}"
+              echo
+              if [ "$unresolved_count" -eq 0 ]; then
+                echo "No unresolved non-outdated review threads were found."
+              else
+                jq -r '
+                  .data.repository.pullRequest.reviewThreads.nodes
+                  | map(select(.isResolved == false and .isOutdated == false))
+                  | to_entries[]
+                  | "### Thread " + ((.key + 1) | tostring) + "\n"
+                    + "- Thread ID: `" + .value.id + "`\n"
+                    + "- Path: `" + (.value.path // "") + "`\n"
+                    + "- Line: `" + ((.value.line // .value.originalLine // "") | tostring) + "`\n"
+                    + "- Original line: `" + ((.value.originalLine // "") | tostring) + "`\n"
+                    + "- Start line: `" + ((.value.startLine // "") | tostring) + "`\n"
+                    + "- Diff side: `" + ((.value.diffSide // "") | tostring) + "`\n"
+                    + "- First comment URL: " + ((.value.comments.nodes[0].url // "")) + "\n"
+                    + "\n"
+                    + (.value.comments.nodes
+                       | to_entries
+                       | map(
+                          "#### Comment " + ((.key + 1) | tostring) + "\n"
+                          + "- ID: `" + .value.id + "`\n"
+                          + "- Author: `" + ((.value.author.login // "") | tostring) + "`\n"
+                          + "- Created: `" + .value.createdAt + "`\n"
+                          + "- URL: " + .value.url + "\n"
+                          + "- Path: `" + ((.value.path // "") | tostring) + "`\n"
+                          + "- Line: `" + ((.value.line // .value.originalLine // "") | tostring) + "`\n"
+                          + "- Review state: `" + ((.value.pullRequestReview.state // "") | tostring) + "`\n"
+                          + "\n"
+                          + "Body:\n\n"
+                          + (.value.body // "")
+                          + "\n\nDiff hunk:\n\n```diff\n"
+                          + (.value.diffHunk // "")
+                          + "\n```\n"
+                        )
+                       | join("\n"))
+                ' "$threads_json"
+              fi
+              echo
               echo "## Pull Request Review Comments"
               echo
               gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/comments" --paginate
             } >> "$CONTEXT_FILE"
+
+            if [ "$fix_unresolved_mode" = "true" ] && [ "$unresolved_count" -eq 0 ]; then
+              message="No unresolved review threads were found."
+              gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$message"
+              echo '{"status":"diagnostic","reason":"No unresolved review threads were found."}' > "$RUNNER_TEMP/pi-fix-result.json"
+              run_agent=false
+            fi
           else
             {
               echo "## Issue"
@@ -253,13 +355,14 @@ jobs:
 
           echo "PI_FIX_CONTEXT_FILE=$CONTEXT_FILE" >> "$GITHUB_ENV"
           echo "PI_FIX_RESULT_FILE=$RUNNER_TEMP/pi-fix-result.json" >> "$GITHUB_ENV"
+          echo "run_agent=$run_agent" >> "$GITHUB_OUTPUT"
 
       - name: Install Pi Coding Agent
-        if: steps.request.outputs.should_run == 'true'
+        if: steps.request.outputs.should_run == 'true' && steps.context.outputs.run_agent != 'false'
         run: curl -fsSL https://pi.dev/install.sh | sh
 
       - name: Run Pi fix
-        if: steps.request.outputs.should_run == 'true'
+        if: steps.request.outputs.should_run == 'true' && steps.context.outputs.run_agent != 'false'
         env:
           KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -285,6 +388,9 @@ jobs:
 
           Goal:
           - Understand the concrete problem requested by the /pi-fix command.
+          - If the command asks to fix all unresolved review threads, review comments,
+            or equivalent wording, use the "Unresolved Review Threads" section as the
+            primary source of truth and do not act on resolved or outdated feedback.
           - Implement the smallest safe fix.
           - Run the relevant checks you can infer from README files, project files,
             package manifests, solution/project files, or existing workflows.
@@ -292,10 +398,14 @@ jobs:
           - Push the current branch named in BRANCH_NAME.
           - Open a pull request against PR_BASE.
           - Comment back on the original issue or pull request with the PR URL.
+          - When fixing unresolved review threads, include the thread/comment URLs
+            addressed by the fix in the pull request body.
 
           Before editing:
           - Inspect the repo structure and the relevant files.
           - Confirm the bug/task from the command and issue/PR context.
+          - For PR targets, check whether the context includes unresolved review
+            threads before relying on the flat pull request comment list.
           - Do not change unrelated code.
 
           Failure policy:
@@ -419,4 +529,12 @@ jobs:
         with:
           name: pi-fix-events-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/pi-fix-events.jsonl
+          if-no-files-found: ignore
+
+      - name: Upload Pi fix context
+        if: always() && steps.request.outputs.should_run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-fix-context-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pi-fix-context.md
           if-no-files-found: ignore
