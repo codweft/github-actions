@@ -1,0 +1,422 @@
+name: pi-fix
+
+on:
+  workflow_call:
+    inputs:
+      issue_number:
+        description: "Issue number to fix for manual callers"
+        required: false
+        type: string
+        default: ""
+      pr_number:
+        description: "Pull request number to fix for manual callers"
+        required: false
+        type: string
+        default: ""
+      instruction:
+        description: "Fix instruction for manual callers"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      KIMI_API_KEY:
+        required: true
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+    steps:
+      - name: Resolve request
+        id: request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          INPUT_ISSUE_NUMBER: ${{ inputs.issue_number }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          INPUT_INSTRUCTION: ${{ inputs.instruction }}
+          EVENT_COMMENT_BODY: ${{ github.event.comment.body }}
+          EVENT_COMMENT_URL: ${{ github.event.comment.html_url }}
+          EVENT_AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
+          EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
+          EVENT_ISSUE_IS_PR: ${{ github.event.issue.pull_request != null }}
+          EVENT_REVIEW_PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          default_branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+          trusted=false
+          target_kind=""
+          issue_number=""
+          pr_number=""
+          command_body=""
+          comment_url=""
+          checkout_ref="$default_branch"
+          pr_base="$default_branch"
+          source_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          case "${{ github.event_name }}" in
+            issue_comment)
+              association="$EVENT_AUTHOR_ASSOCIATION"
+              case "$association" in
+                OWNER|MEMBER|COLLABORATOR) trusted=true ;;
+              esac
+              issue_number="$EVENT_ISSUE_NUMBER"
+              command_body="$EVENT_COMMENT_BODY"
+              comment_url="$EVENT_COMMENT_URL"
+              source_url="$comment_url"
+              if [ "$EVENT_ISSUE_IS_PR" = "true" ]; then
+                target_kind="pull_request"
+                pr_number="$issue_number"
+              else
+                target_kind="issue"
+              fi
+              ;;
+            pull_request_review_comment)
+              association="$EVENT_AUTHOR_ASSOCIATION"
+              case "$association" in
+                OWNER|MEMBER|COLLABORATOR) trusted=true ;;
+              esac
+              target_kind="pull_request"
+              pr_number="$EVENT_REVIEW_PR_NUMBER"
+              command_body="$EVENT_COMMENT_BODY"
+              comment_url="$EVENT_COMMENT_URL"
+              source_url="$comment_url"
+              ;;
+            workflow_dispatch)
+              trusted=true
+              command_body="$INPUT_INSTRUCTION"
+              if [ -n "$INPUT_PR_NUMBER" ]; then
+                target_kind="pull_request"
+                pr_number="$INPUT_PR_NUMBER"
+              elif [ -n "$INPUT_ISSUE_NUMBER" ]; then
+                target_kind="issue"
+                issue_number="$INPUT_ISSUE_NUMBER"
+              else
+                echo "workflow_dispatch requires issue_number or pr_number." >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Unsupported event: ${{ github.event_name }}" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ "$target_kind" = "pull_request" ]; then
+            pr_data=$(gh pr view "$pr_number" --json headRepository,headRefName,baseRefName,url)
+            head_repo=$(echo "$pr_data" | jq -r '.headRepository.nameWithOwner')
+            head_ref=$(echo "$pr_data" | jq -r '.headRefName')
+            base_ref=$(echo "$pr_data" | jq -r '.baseRefName')
+            pr_url=$(echo "$pr_data" | jq -r '.url')
+            if [ "$head_repo" != "$GITHUB_REPOSITORY" ]; then
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+              echo "trusted=$trusted" >> "$GITHUB_OUTPUT"
+              echo "target_kind=$target_kind" >> "$GITHUB_OUTPUT"
+              echo "issue_number=$pr_number" >> "$GITHUB_OUTPUT"
+              echo "message=Pi fix cannot safely create a stacked PR for forked pull request $pr_url." >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            checkout_ref="$head_ref"
+            pr_base="$head_ref"
+            branch_name="pi-fix/pr-${pr_number}-${GITHUB_RUN_ID}"
+            source_url="$pr_url"
+          else
+            branch_name="pi-fix/issue-${issue_number}-${GITHUB_RUN_ID}"
+          fi
+
+          if [ "$trusted" != "true" ]; then
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "trusted=false" >> "$GITHUB_OUTPUT"
+            echo "target_kind=$target_kind" >> "$GITHUB_OUTPUT"
+            echo "issue_number=${issue_number:-$pr_number}" >> "$GITHUB_OUTPUT"
+            echo "message=The /pi-fix command can only be used by repository owners, members, or collaborators." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo "should_run=true"
+            echo "trusted=true"
+            echo "target_kind=$target_kind"
+            echo "issue_number=$issue_number"
+            echo "pr_number=$pr_number"
+            echo "checkout_ref=$checkout_ref"
+            echo "pr_base=$pr_base"
+            echo "branch_name=$branch_name"
+            echo "source_url=$source_url"
+            echo "command_body<<EOF"
+            printf '%s\n' "$command_body"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Comment when request is rejected
+        if: steps.request.outputs.should_run == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_KIND: ${{ steps.request.outputs.target_kind }}
+          ISSUE_NUMBER: ${{ steps.request.outputs.issue_number }}
+          MESSAGE: ${{ steps.request.outputs.message }}
+        run: |
+          set -euo pipefail
+          if [ "$TARGET_KIND" = "pull_request" ]; then
+            gh pr comment "$ISSUE_NUMBER" --body "$MESSAGE"
+          else
+            gh issue comment "$ISSUE_NUMBER" --body "$MESSAGE"
+          fi
+
+      - name: React to trigger comment
+        if: steps.request.outputs.should_run == 'true' && (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request_review_comment" ]; then
+            path="/repos/${{ github.repository }}/pulls/comments/${COMMENT_ID}/reactions"
+          else
+            path="/repos/${{ github.repository }}/issues/comments/${COMMENT_ID}/reactions"
+          fi
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "$path" \
+            -f content="eyes" || true
+
+      - name: Checkout repository
+        if: steps.request.outputs.should_run == 'true'
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.request.outputs.checkout_ref }}
+
+      - name: Create working branch
+        if: steps.request.outputs.should_run == 'true'
+        env:
+          BRANCH_NAME: ${{ steps.request.outputs.branch_name }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH_NAME"
+
+      - name: Build request context
+        if: steps.request.outputs.should_run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_KIND: ${{ steps.request.outputs.target_kind }}
+          ISSUE_NUMBER: ${{ steps.request.outputs.issue_number }}
+          PR_NUMBER: ${{ steps.request.outputs.pr_number }}
+          COMMAND_BODY: ${{ steps.request.outputs.command_body }}
+          SOURCE_URL: ${{ steps.request.outputs.source_url }}
+          PR_BASE: ${{ steps.request.outputs.pr_base }}
+          BRANCH_NAME: ${{ steps.request.outputs.branch_name }}
+        run: |
+          set -euo pipefail
+          CONTEXT_FILE="$RUNNER_TEMP/pi-fix-context.md"
+          {
+            echo "# Pi Fix Context"
+            echo
+            echo "- Repository: ${GITHUB_REPOSITORY}"
+            echo "- Target kind: ${TARGET_KIND}"
+            echo "- Source URL: ${SOURCE_URL}"
+            echo "- Working branch: ${BRANCH_NAME}"
+            echo "- Pull request base for generated fix: ${PR_BASE}"
+            echo
+            echo "## Command"
+            echo
+            printf '%s\n' "$COMMAND_BODY"
+            echo
+          } > "$CONTEXT_FILE"
+
+          if [ "$TARGET_KIND" = "pull_request" ]; then
+            {
+              echo "## Pull Request"
+              echo
+              gh pr view "$PR_NUMBER" --json number,title,body,author,baseRefName,headRefName,url,files,comments
+              echo
+              echo "## Pull Request Review Comments"
+              echo
+              gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/comments" --paginate
+            } >> "$CONTEXT_FILE"
+          else
+            {
+              echo "## Issue"
+              echo
+              gh issue view "$ISSUE_NUMBER" --json number,title,body,author,labels,state,url,comments
+            } >> "$CONTEXT_FILE"
+          fi
+
+          echo "PI_FIX_CONTEXT_FILE=$CONTEXT_FILE" >> "$GITHUB_ENV"
+          echo "PI_FIX_RESULT_FILE=$RUNNER_TEMP/pi-fix-result.json" >> "$GITHUB_ENV"
+
+      - name: Install Pi Coding Agent
+        if: steps.request.outputs.should_run == 'true'
+        run: curl -fsSL https://pi.dev/install.sh | sh
+
+      - name: Run Pi fix
+        if: steps.request.outputs.should_run == 'true'
+        env:
+          KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          TARGET_KIND: ${{ steps.request.outputs.target_kind }}
+          ISSUE_NUMBER: ${{ steps.request.outputs.issue_number }}
+          PR_NUMBER: ${{ steps.request.outputs.pr_number }}
+          PR_BASE: ${{ steps.request.outputs.pr_base }}
+          BRANCH_NAME: ${{ steps.request.outputs.branch_name }}
+          SOURCE_URL: ${{ steps.request.outputs.source_url }}
+        run: |
+          export PATH="$HOME/.pi/bin:$PATH"
+          set -o pipefail
+
+          PROMPT_FILE="$RUNNER_TEMP/pi-fix-prompt.txt"
+          cat > "$PROMPT_FILE" <<'PROMPT'
+          You are an automated coding agent running in GitHub Actions.
+
+          All user-facing comments, commit messages, pull request titles, and pull
+          request descriptions MUST be written in English.
+
+          Read the full request context from the file at PI_FIX_CONTEXT_FILE.
+
+          Goal:
+          - Understand the concrete problem requested by the /pi-fix command.
+          - Implement the smallest safe fix.
+          - Run the relevant checks you can infer from README files, project files,
+            package manifests, solution/project files, or existing workflows.
+          - Create exactly one commit with the fix.
+          - Push the current branch named in BRANCH_NAME.
+          - Open a pull request against PR_BASE.
+          - Comment back on the original issue or pull request with the PR URL.
+
+          Before editing:
+          - Inspect the repo structure and the relevant files.
+          - Confirm the bug/task from the command and issue/PR context.
+          - Do not change unrelated code.
+
+          Failure policy:
+          - If the request is ambiguous, unsafe, too broad, blocked by missing
+            credentials, or cannot be validated enough to create a credible fix,
+            do NOT create a PR.
+          - Instead, comment a concise diagnostic on the original issue or PR:
+            what you checked, why you did not produce a fix, and the next concrete
+            step needed from a human.
+
+          GitHub commands:
+          - Use `gh issue comment "$ISSUE_NUMBER"` for issues.
+          - Use `gh pr comment "$PR_NUMBER"` for pull requests.
+          - Use `gh pr create --base "$PR_BASE" --head "$BRANCH_NAME"` to open the PR.
+          - Include the source URL from SOURCE_URL in the generated PR body.
+
+          Result marker:
+          - After opening a PR or posting a diagnostic, write JSON to PI_FIX_RESULT_FILE:
+            {"status":"pr-created","url":"<pull request url>"}
+            or
+            {"status":"diagnostic","reason":"<short reason>"}
+          - Do not write secrets into the result file.
+          PROMPT
+
+          RUN_PI="$RUNNER_TEMP/run-pi-fix.sh"
+          cat > "$RUN_PI" <<'EOS'
+          #!/usr/bin/env bash
+          exec pi --mode json --provider kimi-coding --model kimi-for-coding "$(cat "$1")"
+          EOS
+          chmod +x "$RUN_PI"
+
+          script -qefc "$RUN_PI '$PROMPT_FILE'" /dev/null \
+            | tee "$RUNNER_TEMP/pi-fix-events.jsonl" \
+            | jq --unbuffered -j '
+                def short($n): tostring | gsub("\\s+"; " ")
+                  | if length > $n then .[0:$n] + "…" else . end;
+                def args_summary:
+                  . as $a |
+                  if   $a.command   then "$ " + ($a.command   | short(240))
+                  elif $a.cmd       then "$ " + ($a.cmd       | short(240))
+                  elif $a.file_path then $a.file_path
+                  elif $a.path      then $a.path
+                  elif $a.file      then $a.file
+                  elif $a.url       then $a.url
+                  else ($a | tostring | short(240)) end;
+
+                . as $e |
+                  if   $e.type == "session"
+                       then "\n[session] cwd=\($e.cwd) v=\($e.version)\n"
+                  elif $e.type == "agent_start"
+                       then "[agent] start\n"
+                  elif $e.type == "agent_end"
+                       then "\n[agent] done\n"
+                  elif $e.type == "turn_start"
+                       then "\n──── turn ────\n"
+                  elif $e.type == "turn_end"
+                       or  $e.type == "message_start"
+                       or  $e.type == "message_end"
+                       or  $e.type == "tool_execution_update"
+                       then empty
+                  elif $e.type == "tool_execution_start"
+                       then "\n[tool→ \($e.toolName)] " + ($e.args | args_summary) + "\n"
+                  elif $e.type == "tool_execution_end"
+                       then "[tool"
+                            + (if $e.isError then "✗" else "✓" end)
+                            + " \($e.toolName)]"
+                            + ( ($e.result.content // []) | map(.text // "") | join(" ")
+                                | gsub("\\s+"; " ")
+                                | if length > 0
+                                  then " → " + (.[0:200] + (if length > 200 then "…" else "" end))
+                                  else "" end )
+                            + "\n"
+                  elif $e.type == "message_update" and $e.assistantMessageEvent.type == "thinking_start"
+                       then "\n[thinking] "
+                  elif $e.type == "message_update" and $e.assistantMessageEvent.type == "thinking_delta"
+                       then $e.assistantMessageEvent.delta
+                  elif $e.type == "message_update" and $e.assistantMessageEvent.type == "text_start"
+                       then "\n[assistant] "
+                  elif $e.type == "message_update" and $e.assistantMessageEvent.type == "text_delta"
+                       then $e.assistantMessageEvent.delta
+                  elif $e.type == "auto_retry_start"
+                       then "\n[retry] start (\($e.reason // "?"))\n"
+                  elif $e.type == "auto_retry_end"
+                       then "[retry] end\n"
+                  else empty end
+              '
+
+      - name: Verify Pi fix result
+        if: steps.request.outputs.should_run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_KIND: ${{ steps.request.outputs.target_kind }}
+          ISSUE_NUMBER: ${{ steps.request.outputs.issue_number }}
+          PR_NUMBER: ${{ steps.request.outputs.pr_number }}
+          BRANCH_NAME: ${{ steps.request.outputs.branch_name }}
+        run: |
+          set -euo pipefail
+          if [ -f "$PI_FIX_RESULT_FILE" ]; then
+            cat "$PI_FIX_RESULT_FILE"
+            exit 0
+          fi
+
+          existing_pr=$(gh pr list --head "$BRANCH_NAME" --json url --jq '.[0].url // ""')
+          if [ -n "$existing_pr" ]; then
+            echo "{\"status\":\"pr-created\",\"url\":\"$existing_pr\"}" > "$PI_FIX_RESULT_FILE"
+            cat "$PI_FIX_RESULT_FILE"
+            exit 0
+          fi
+
+          message="Pi fix finished without creating a pull request or diagnostic. Please inspect this workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [ "$TARGET_KIND" = "pull_request" ]; then
+            gh pr comment "$PR_NUMBER" --body "$message"
+          else
+            gh issue comment "$ISSUE_NUMBER" --body "$message"
+          fi
+          exit 1
+
+      - name: Upload Pi fix event transcript
+        if: always() && steps.request.outputs.should_run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-fix-events-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pi-fix-events.jsonl
+          if-no-files-found: ignore
