@@ -7,6 +7,9 @@ Reusable GitHub Actions workflows and automations.
 ### `pi-review`
 
 Reusable pull request review workflow powered by Pi Coding Agent.
+Use `/pi-review` for comment-triggered reviews. The shorter `/review` alias is
+intentionally not supported so repositories can avoid command conflicts with
+other tools.
 
 Caller workflow:
 
