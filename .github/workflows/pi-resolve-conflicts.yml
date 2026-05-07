@@ -448,8 +448,10 @@ jobs:
               configured_models=$((configured_models + 1))
             fi
 
+            set +e
             run_pi_with_model "$provider" "$model" "$secret_name"
             status=$?
+            set -e
             if [ "$status" -eq 0 ]; then
               exit 0
             fi
