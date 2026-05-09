@@ -6,14 +6,14 @@ The Codweft GitHub App installs a single router workflow
 calls these reusables by version tag, e.g.:
 
 ```yaml
-uses: codweft/github-actions/.github/workflows/codweft-review.yml@v0.3.0
+uses: codweft/github-actions/.github/workflows/codweft-review.yml@v0.3.1
 ```
 
 You can read every workflow before you ship it. That is the point.
 
 ## Versioning
 
-This repository is published as semantic version tags (`v0.2.0`, `v0.3.0`,
+This repository is published as semantic version tags (`v0.2.0`, `v0.3.1`,
 …). The Codweft control plane pins a specific tag per destination repo and
 opens a pull request when it wants to bump the pinned version. **Do not use
 `@main` in production callers**. Pin a tag.
@@ -41,7 +41,7 @@ Caller workflow:
 ```yaml
 jobs:
   review:
-    uses: codweft/github-actions/.github/workflows/codweft-review.yml@v0.3.0
+    uses: codweft/github-actions/.github/workflows/codweft-review.yml@v0.3.1
     permissions:
       contents: read
       pull-requests: write
@@ -70,7 +70,7 @@ Caller workflow:
 ```yaml
 jobs:
   fix:
-    uses: codweft/github-actions/.github/workflows/codweft-fix.yml@v0.3.0
+    uses: codweft/github-actions/.github/workflows/codweft-fix.yml@v0.3.1
     permissions:
       contents: write
       pull-requests: write
@@ -112,7 +112,7 @@ Caller workflow:
 ```yaml
 jobs:
   implement:
-    uses: codweft/github-actions/.github/workflows/codweft-implement.yml@v0.3.0
+    uses: codweft/github-actions/.github/workflows/codweft-implement.yml@v0.3.1
     permissions:
       contents: write
       pull-requests: write
@@ -145,7 +145,7 @@ Caller workflow:
 ```yaml
 jobs:
   resolve-conflicts:
-    uses: codweft/github-actions/.github/workflows/codweft-resolve-conflicts.yml@v0.3.0
+    uses: codweft/github-actions/.github/workflows/codweft-resolve-conflicts.yml@v0.3.1
     permissions:
       contents: write
       pull-requests: write

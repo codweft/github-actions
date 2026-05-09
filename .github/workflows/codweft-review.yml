@@ -137,6 +137,35 @@ jobs:
           codweft-api /api/github/actions/comment "$body_file" >/dev/null
           BASH
 
+          cat > "$helper_dir/codweft-pr-review" <<'BASH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [ "$#" -ne 3 ]; then
+            echo "Usage: codweft-pr-review PR_NUMBER COMMIT_SHA REVIEW_JSON_FILE" >&2
+            exit 2
+          fi
+          body_file=$(mktemp)
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --argjson repositoryId "$CODWEFT_REPOSITORY_ID" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --argjson number "$1" \
+            --arg commitSha "$2" \
+            --slurpfile review "$3" \
+            '{
+              repository:$repository,
+              repositoryId:$repositoryId,
+              runId:$runId,
+              target:"pull_request_review",
+              number:$number,
+              commitSha:$commitSha,
+              body:($review[0].body // "Codweft review findings."),
+              comments:($review[0].comments // [])
+            }' \
+            > "$body_file"
+          codweft-api /api/github/actions/comment "$body_file" >/dev/null
+          BASH
+
           cat > "$helper_dir/codweft-react" <<'BASH'
           #!/usr/bin/env bash
           set -euo pipefail
@@ -162,7 +191,7 @@ jobs:
           codweft-api /api/github/actions/reaction "$body_file" >/dev/null
           BASH
 
-          chmod +x "$helper_dir/codweft-api" "$helper_dir/codweft-comment" "$helper_dir/codweft-react"
+          chmod +x "$helper_dir/codweft-api" "$helper_dir/codweft-comment" "$helper_dir/codweft-pr-review" "$helper_dir/codweft-react"
           {
             echo "CODWEFT_API_ORIGIN=${CODWEFT_API_ORIGIN:-https://codweft.com}"
             echo "CODWEFT_REPOSITORY_ID=${CODWEFT_REPOSITORY_ID}"
@@ -265,21 +294,26 @@ jobs:
           ============================================================
           STEP 4 — Post one review comment per finding
           ============================================================
-          Group all findings into a SINGLE pull request review:
+          Group all findings into a SINGLE pull request review using the Codweft
+          GitHub App helper. Write a JSON file with this shape:
 
-            gh api \
-              --method POST \
-              -H "Accept: application/vnd.github+json" \
-              "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews" \
-              -f commit_id="$PR_HEAD_SHA" \
-              -f event="COMMENT" \
-              -f body="<overall summary>" \
-              -F 'comments[][path]=<file path>' \
-              -F 'comments[][line]=<line number>' \
-              -F 'comments[][side]=RIGHT' \
-              -F 'comments[][body]=<finding body>'
+            {
+              "body": "<overall summary>",
+              "comments": [
+                {
+                  "path": "<file path>",
+                  "line": <line number>,
+                  "side": "RIGHT",
+                  "body": "<finding body>"
+                }
+              ]
+            }
 
-          (Repeat the four `comments[][...]` flags for each finding.)
+          Then post it with:
+
+            codweft-pr-review "$PR_NUMBER" "$PR_HEAD_SHA" "$RUNNER_TEMP/codweft-review-comments.json"
+
+          Do not use `gh api` or `gh pr comment` for review comments.
 
           Each finding MUST start with a priority tag [P0]/[P1]/[P2]/[P3], be one
           short paragraph (no internal line breaks), explain WHY it is a bug citing
