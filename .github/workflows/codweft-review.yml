@@ -1,4 +1,4 @@
-name: pi-review
+name: codweft-review
 
 on:
   workflow_call:
@@ -79,10 +79,10 @@ jobs:
           persist-credentials: false
           ref: ${{ steps.pr.outputs.head_sha }}
 
-      - name: Install Pi Coding Agent
+      - name: Install coding agent
         run: curl -fsSL https://pi.dev/install.sh | sh
 
-      - name: Run Pi review
+      - name: Run Codweft review
         env:
           KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
@@ -98,7 +98,7 @@ jobs:
 
           # Persist the prompt to a file so the script-wrapper below can read it
           # without re-escaping a heredoc inside `script -c`.
-          PROMPT_FILE="$RUNNER_TEMP/pi-prompt.txt"
+          PROMPT_FILE="$RUNNER_TEMP/agent-prompt.txt"
           cat > "$PROMPT_FILE" <<'PROMPT'
           You are acting as a reviewer for a proposed code change in a GitHub Pull Request.
 
@@ -201,19 +201,19 @@ jobs:
           any text outside of these comments.
           PROMPT
 
-          # Wrapper script: load the prompt and exec pi. Defined as a file so the
+          # Wrapper script: load the prompt and run the configured coding agent. Defined as a file so the
           # `script` invocation below stays a one-liner.
-          RUN_PI="$RUNNER_TEMP/run-pi.sh"
-          cat > "$RUN_PI" <<'EOS'
+          RUN_AGENT="$RUNNER_TEMP/run-agent.sh"
+          cat > "$RUN_AGENT" <<'EOS'
           #!/usr/bin/env bash
           exec pi --mode json --provider "$2" --model "$3" "$(cat "$1")"
           EOS
-          chmod +x "$RUN_PI"
+          chmod +x "$RUN_AGENT"
 
-          EVENTS_FILE="$RUNNER_TEMP/pi-events.jsonl"
+          EVENTS_FILE="$RUNNER_TEMP/agent-events.jsonl"
           : > "$EVENTS_FILE"
 
-          run_pi_with_model() {
+          run_agent_with_model() {
             local provider="$1"
             local model="$2"
             local secret_name="$3"
@@ -226,10 +226,10 @@ jobs:
 
             echo "Trying ${provider}/${model}"
             set +e
-            # `script` allocates a pseudo-TTY so pi's stdout is line-buffered
+            # `script` allocates a pseudo-TTY so agent stdout is line-buffered
             # instead of block-buffered, which is what makes events appear live in
             # the Actions log. `jq --unbuffered` also flushes per output line.
-            script -qefc "$RUN_PI '$PROMPT_FILE' '$provider' '$model'" /dev/null \
+            script -qefc "$RUN_AGENT '$PROMPT_FILE' '$provider' '$model'" /dev/null \
               | tee -a "$EVENTS_FILE" \
               | jq --unbuffered -j '
                 def short($n): tostring | gsub("\\s+"; " ")
@@ -288,16 +288,16 @@ jobs:
 
                   else empty end
               '
-            local pi_status=${PIPESTATUS[0]}
+            local agent_status=${PIPESTATUS[0]}
             set +e
 
-            if [ "$pi_status" -eq 0 ]; then
-              echo "Pi completed with ${provider}/${model}"
+            if [ "$agent_status" -eq 0 ]; then
+              echo "Agent completed with ${provider}/${model}"
               return 0
             fi
 
-            echo "Pi failed with ${provider}/${model} (exit ${pi_status}); trying next configured model"
-            return "$pi_status"
+            echo "Agent failed with ${provider}/${model} (exit ${agent_status}); trying next configured model"
+            return "$agent_status"
           }
 
           configured_models=0
@@ -313,7 +313,7 @@ jobs:
             fi
 
             set +e
-            run_pi_with_model "$provider" "$model" "$secret_name"
+            run_agent_with_model "$provider" "$model" "$secret_name"
             status=$?
             set -e
             if [ "$status" -eq 0 ]; then
@@ -322,16 +322,16 @@ jobs:
           done
 
           if [ "$configured_models" -eq 0 ]; then
-            echo "No Pi model API keys are configured. Configure at least one of KIMI_API_KEY, ZAI_API_KEY, or MINIMAX_API_KEY." >&2
+            echo "No model API keys are configured. Configure at least one of KIMI_API_KEY, ZAI_API_KEY, or MINIMAX_API_KEY." >&2
           else
-            echo "All configured Pi models failed." >&2
+            echo "All configured agent models failed." >&2
           fi
           exit 1
 
-      - name: Upload Pi event transcript
+      - name: Upload Codweft event transcript
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pi-events-${{ steps.pr.outputs.number }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/pi-events.jsonl
+          name: codweft-events-${{ steps.pr.outputs.number }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-events.jsonl
           if-no-files-found: ignore

@@ -1,4 +1,4 @@
-name: pi-implement
+name: codweft-implement
 
 on:
   workflow_call:
@@ -66,17 +66,17 @@ jobs:
               if [ "$EVENT_ISSUE_IS_PR" = "true" ]; then
                 echo "should_run=false" >> "$GITHUB_OUTPUT"
                 echo "issue_number=$issue_number" >> "$GITHUB_OUTPUT"
-                echo "message=/pi-implement can only be used on issues, not pull requests." >> "$GITHUB_OUTPUT"
+                echo "message=@codweft implement can only be used on issues, not pull requests." >> "$GITHUB_OUTPUT"
                 exit 0
               fi
               ;;
             issues)
               issue_number="$EVENT_ISSUE_NUMBER"
-              command_body="/pi-implement triggered by label ready-for-pi"
-              if [ "$EVENT_LABEL_NAME" != "ready-for-pi" ]; then
+              command_body="@codweft implement triggered by label ready-for-codweft"
+              if [ "$EVENT_LABEL_NAME" != "ready-for-codweft" ]; then
                 echo "should_run=false" >> "$GITHUB_OUTPUT"
                 echo "issue_number=$issue_number" >> "$GITHUB_OUTPUT"
-                echo "message=Ignoring label '$EVENT_LABEL_NAME'. /pi-implement only runs for ready-for-pi." >> "$GITHUB_OUTPUT"
+                echo "message=Ignoring label '$EVENT_LABEL_NAME'. @codweft implement only runs for ready-for-codweft." >> "$GITHUB_OUTPUT"
                 exit 0
               fi
 
@@ -87,7 +87,7 @@ jobs:
               ;;
             workflow_dispatch)
               trusted=true
-              command_body="${INPUT_INSTRUCTION:-/pi-implement}"
+              command_body="${INPUT_INSTRUCTION:-@codweft implement}"
               if [ -z "$INPUT_ISSUE_NUMBER" ]; then
                 echo "workflow_dispatch requires issue_number." >&2
                 exit 1
@@ -103,7 +103,7 @@ jobs:
           if [ "$trusted" != "true" ]; then
             echo "should_run=false" >> "$GITHUB_OUTPUT"
             echo "issue_number=$issue_number" >> "$GITHUB_OUTPUT"
-            echo "message=The /pi-implement workflow can only be used by repository owners, members, collaborators, or users with write access." >> "$GITHUB_OUTPUT"
+            echo "message=The @codweft implement workflow can only be used by repository owners, members, collaborators, or users with write access." >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -113,11 +113,11 @@ jobs:
           if [ "$issue_state" != "OPEN" ]; then
             echo "should_run=false" >> "$GITHUB_OUTPUT"
             echo "issue_number=$issue_number" >> "$GITHUB_OUTPUT"
-            echo "message=/pi-implement only runs on open issues. Issue ${issue_number} is ${issue_state}." >> "$GITHUB_OUTPUT"
+            echo "message=@codweft implement only runs on open issues. Issue ${issue_number} is ${issue_state}." >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          branch_name="pi-implement/issue-${issue_number}-${GITHUB_RUN_ID}"
+          branch_name="codweft-implement/issue-${issue_number}-${GITHUB_RUN_ID}"
 
           {
             echo "should_run=true"
@@ -175,9 +175,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          CONTEXT_FILE="$RUNNER_TEMP/pi-implement-context.md"
+          CONTEXT_FILE="$RUNNER_TEMP/codweft-implement-context.md"
           {
-            echo "# Pi Implement Context"
+            echo "# Codweft Implement Context"
             echo
             echo "- Repository: ${GITHUB_REPOSITORY}"
             echo "- Issue: ${ISSUE_URL}"
@@ -200,14 +200,14 @@ jobs:
             echo
           } > "$CONTEXT_FILE"
 
-          echo "PI_IMPLEMENT_CONTEXT_FILE=$CONTEXT_FILE" >> "$GITHUB_ENV"
-          echo "PI_IMPLEMENT_RESULT_FILE=$RUNNER_TEMP/pi-implement-result.json" >> "$GITHUB_ENV"
+          echo "CODWEFT_IMPLEMENT_CONTEXT_FILE=$CONTEXT_FILE" >> "$GITHUB_ENV"
+          echo "CODWEFT_IMPLEMENT_RESULT_FILE=$RUNNER_TEMP/codweft-implement-result.json" >> "$GITHUB_ENV"
 
-      - name: Install Pi Coding Agent
+      - name: Install coding agent
         if: steps.request.outputs.should_run == 'true'
         run: curl -fsSL https://pi.dev/install.sh | sh
 
-      - name: Run Pi implement
+      - name: Run Codweft implement
         if: steps.request.outputs.should_run == 'true'
         env:
           KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
@@ -224,21 +224,21 @@ jobs:
           export PATH="$HOME/.pi/bin:$PATH"
           set -o pipefail
 
-          PROMPT_FILE="$RUNNER_TEMP/pi-implement-prompt.txt"
+          PROMPT_FILE="$RUNNER_TEMP/codweft-implement-prompt.txt"
           cat > "$PROMPT_FILE" <<'PROMPT'
           You are an automated coding agent running in GitHub Actions.
 
           All user-facing comments, commit messages, pull request titles, and pull
           request descriptions MUST be written in English.
 
-          Read the full request context from the file at PI_IMPLEMENT_CONTEXT_FILE.
+          Read the full request context from the file at CODWEFT_IMPLEMENT_CONTEXT_FILE.
 
           Goal:
-          - Implement the complete GitHub issue requested by /pi-implement.
+          - Implement the complete GitHub issue requested by @codweft implement.
           - This workflow is only for implementing issues. Do not treat it as a
             review-feedback fixer or conflict resolver.
           - Use the full issue history, including your previous questions and human
-            answers from earlier /pi-implement attempts.
+            answers from earlier @codweft implement attempts.
 
           Clarification policy:
           - Before creating a branch or pull request, decide whether the issue is
@@ -248,7 +248,7 @@ jobs:
           - Instead, comment concrete questions on the issue with:
             gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "<questions>"
           - Then write {"status":"diagnostic","reason":"<short reason>"} to
-            PI_IMPLEMENT_RESULT_FILE.
+            CODWEFT_IMPLEMENT_RESULT_FILE.
 
           Implementation flow when the issue is ready:
           - Create and switch to the branch named in BRANCH_NAME from the current
@@ -268,7 +268,7 @@ jobs:
             linked issue.
           - Mark the PR ready for review.
           - Comment on the issue with the PR URL.
-          - Comment "/pi-review" on the generated PR so the review workflow starts.
+          - Comment "@codweft review" on the generated PR so the review workflow starts.
 
           Failure policy after creating a draft PR:
           - If no real changes were made after the initial empty commit, close the
@@ -290,17 +290,17 @@ jobs:
           - Do not write secrets into the result file.
           PROMPT
 
-          RUN_PI="$RUNNER_TEMP/run-pi-implement.sh"
-          cat > "$RUN_PI" <<'EOS'
+          RUN_AGENT="$RUNNER_TEMP/run-codweft-implement.sh"
+          cat > "$RUN_AGENT" <<'EOS'
           #!/usr/bin/env bash
           exec pi --mode json --provider "$2" --model "$3" "$(cat "$1")"
           EOS
-          chmod +x "$RUN_PI"
+          chmod +x "$RUN_AGENT"
 
-          EVENTS_FILE="$RUNNER_TEMP/pi-implement-events.jsonl"
+          EVENTS_FILE="$RUNNER_TEMP/codweft-implement-events.jsonl"
           : > "$EVENTS_FILE"
 
-          run_pi_with_model() {
+          run_agent_with_model() {
             local provider="$1"
             local model="$2"
             local secret_name="$3"
@@ -313,7 +313,7 @@ jobs:
 
             echo "Trying ${provider}/${model}"
             set +e
-            script -qefc "$RUN_PI '$PROMPT_FILE' '$provider' '$model'" /dev/null \
+            script -qefc "$RUN_AGENT '$PROMPT_FILE' '$provider' '$model'" /dev/null \
               | tee -a "$EVENTS_FILE" \
               | jq --unbuffered -j '
                 def short($n): tostring | gsub("\\s+"; " ")
@@ -368,16 +368,16 @@ jobs:
                        then "[retry] end\n"
                   else empty end
               '
-            local pi_status=${PIPESTATUS[0]}
+            local agent_status=${PIPESTATUS[0]}
             set +e
 
-            if [ "$pi_status" -eq 0 ]; then
-              echo "Pi completed with ${provider}/${model}"
+            if [ "$agent_status" -eq 0 ]; then
+              echo "Agent completed with ${provider}/${model}"
               return 0
             fi
 
-            echo "Pi failed with ${provider}/${model} (exit ${pi_status}); trying next configured model"
-            return "$pi_status"
+            echo "Agent failed with ${provider}/${model} (exit ${agent_status}); trying next configured model"
+            return "$agent_status"
           }
 
           configured_models=0
@@ -393,7 +393,7 @@ jobs:
             fi
 
             set +e
-            run_pi_with_model "$provider" "$model" "$secret_name"
+            run_agent_with_model "$provider" "$model" "$secret_name"
             status=$?
             set -e
             if [ "$status" -eq 0 ]; then
@@ -402,13 +402,13 @@ jobs:
           done
 
           if [ "$configured_models" -eq 0 ]; then
-            echo "No Pi model API keys are configured. Configure at least one of KIMI_API_KEY, ZAI_API_KEY, or MINIMAX_API_KEY." >&2
+            echo "No model API keys are configured. Configure at least one of KIMI_API_KEY, ZAI_API_KEY, or MINIMAX_API_KEY." >&2
           else
-            echo "All configured Pi models failed." >&2
+            echo "All configured agent models failed." >&2
           fi
           exit 1
 
-      - name: Verify Pi implement result
+      - name: Verify Codweft implement result
         id: result
         if: steps.request.outputs.should_run == 'true'
         env:
@@ -417,10 +417,10 @@ jobs:
           BRANCH_NAME: ${{ steps.request.outputs.branch_name }}
         run: |
           set -euo pipefail
-          if [ -f "$PI_IMPLEMENT_RESULT_FILE" ]; then
-            cat "$PI_IMPLEMENT_RESULT_FILE"
-            status=$(jq -r '.status // ""' "$PI_IMPLEMENT_RESULT_FILE")
-            url=$(jq -r '.url // ""' "$PI_IMPLEMENT_RESULT_FILE")
+          if [ -f "$CODWEFT_IMPLEMENT_RESULT_FILE" ]; then
+            cat "$CODWEFT_IMPLEMENT_RESULT_FILE"
+            status=$(jq -r '.status // ""' "$CODWEFT_IMPLEMENT_RESULT_FILE")
+            url=$(jq -r '.url // ""' "$CODWEFT_IMPLEMENT_RESULT_FILE")
             if [ "$status" = "pr-ready" ] && [ -n "$url" ] && [ "$url" != "null" ]; then
               echo "should_review=true" >> "$GITHUB_OUTPUT"
               echo "pr_number=${url##*/}" >> "$GITHUB_OUTPUT"
@@ -435,11 +435,11 @@ jobs:
             url=$(echo "$existing_pr" | jq -r '.url')
             is_draft=$(echo "$existing_pr" | jq -r '.isDraft')
             if [ "$is_draft" = "true" ]; then
-              echo "{\"status\":\"draft-blocked\",\"url\":\"$url\",\"reason\":\"Pi did not write a result marker.\"}" > "$PI_IMPLEMENT_RESULT_FILE"
+              echo "{\"status\":\"draft-blocked\",\"url\":\"$url\",\"reason\":\"the agent did not write a result marker.\"}" > "$CODWEFT_IMPLEMENT_RESULT_FILE"
             else
-              echo "{\"status\":\"pr-ready\",\"url\":\"$url\"}" > "$PI_IMPLEMENT_RESULT_FILE"
+              echo "{\"status\":\"pr-ready\",\"url\":\"$url\"}" > "$CODWEFT_IMPLEMENT_RESULT_FILE"
             fi
-            cat "$PI_IMPLEMENT_RESULT_FILE"
+            cat "$CODWEFT_IMPLEMENT_RESULT_FILE"
             if [ "$is_draft" = "true" ]; then
               echo "should_review=false" >> "$GITHUB_OUTPUT"
             else
@@ -449,26 +449,26 @@ jobs:
             exit 0
           fi
 
-          message="Pi implement finished without creating a pull request or diagnostic. Please inspect this workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          message="Codweft implement finished without creating a pull request or diagnostic. Please inspect this workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$message"
-          echo '{"status":"diagnostic","reason":"No pull request was created."}' > "$PI_IMPLEMENT_RESULT_FILE"
-          cat "$PI_IMPLEMENT_RESULT_FILE"
+          echo '{"status":"diagnostic","reason":"No pull request was created."}' > "$CODWEFT_IMPLEMENT_RESULT_FILE"
+          cat "$CODWEFT_IMPLEMENT_RESULT_FILE"
           echo "should_review=false" >> "$GITHUB_OUTPUT"
 
-      - name: Upload Pi implement event transcript
+      - name: Upload Codweft implement event transcript
         if: always() && steps.request.outputs.should_run == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: pi-implement-events-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/pi-implement-events.jsonl
+          name: codweft-implement-events-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codweft-implement-events.jsonl
           if-no-files-found: ignore
 
-      - name: Upload Pi implement context
+      - name: Upload Codweft implement context
         if: always() && steps.request.outputs.should_run == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: pi-implement-context-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/pi-implement-context.md
+          name: codweft-implement-context-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codweft-implement-context.md
           if-no-files-found: ignore
 
   review-created-pr:
@@ -478,7 +478,7 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
-    uses: codweft/github-actions/.github/workflows/pi-review.yml@v0.1.0
+    uses: codweft/github-actions/.github/workflows/codweft-review.yml@v0.2.0
     with:
       pr_number: ${{ needs.implement.outputs.pr_number }}
     secrets: inherit

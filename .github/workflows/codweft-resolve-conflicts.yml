@@ -1,4 +1,4 @@
-name: pi-resolve-conflicts
+name: codweft-resolve-conflicts
 
 on:
   workflow_call:
@@ -62,7 +62,7 @@ jobs:
                 echo "trusted=$trusted" >> "$GITHUB_OUTPUT"
                 echo "pr_number=$EVENT_ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
                 echo "comment_target=issue" >> "$GITHUB_OUTPUT"
-                echo "message=/pi-resolve-conflicts can only be used on pull requests." >> "$GITHUB_OUTPUT"
+                echo "message=@codweft resolve conflicts can only be used on pull requests." >> "$GITHUB_OUTPUT"
                 exit 0
               fi
               pr_number="$EVENT_ISSUE_NUMBER"
@@ -71,7 +71,7 @@ jobs:
               ;;
             workflow_dispatch)
               trusted=true
-              command_body="${INPUT_INSTRUCTION:-/pi-resolve-conflicts}"
+              command_body="${INPUT_INSTRUCTION:-@codweft resolve conflicts}"
               if [ -z "$INPUT_PR_NUMBER" ]; then
                 echo "workflow_dispatch requires pr_number." >&2
                 exit 1
@@ -89,7 +89,7 @@ jobs:
             echo "trusted=false" >> "$GITHUB_OUTPUT"
             echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
             echo "comment_target=$comment_target" >> "$GITHUB_OUTPUT"
-            echo "message=The /pi-resolve-conflicts command can only be used by repository owners, members, or collaborators." >> "$GITHUB_OUTPUT"
+            echo "message=The @codweft resolve conflicts command can only be used by repository owners, members, or collaborators." >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -104,11 +104,11 @@ jobs:
             echo "trusted=true" >> "$GITHUB_OUTPUT"
             echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
             echo "comment_target=pull_request" >> "$GITHUB_OUTPUT"
-            echo "message=Pi cannot safely create a stacked conflict-resolution PR for forked pull request $pr_url." >> "$GITHUB_OUTPUT"
+            echo "message=Codweft cannot safely create a stacked conflict-resolution PR for forked pull request $pr_url." >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          branch_name="pi-resolve-conflicts/pr-${pr_number}-${GITHUB_RUN_ID}"
+          branch_name="codweft-resolve-conflicts/pr-${pr_number}-${GITHUB_RUN_ID}"
 
           {
             echo "should_run=true"
@@ -191,20 +191,20 @@ jobs:
             git merge --abort || true
             message="No merge conflicts were found when merging ${BASE_REF} into this pull request head."
             gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$message"
-            echo '{"status":"diagnostic","reason":"No merge conflicts were found."}' > "$RUNNER_TEMP/pi-resolve-conflicts-result.json"
-            echo "PI_RESOLVE_CONFLICTS_RESULT_FILE=$RUNNER_TEMP/pi-resolve-conflicts-result.json" >> "$GITHUB_ENV"
+            echo '{"status":"diagnostic","reason":"No merge conflicts were found."}' > "$RUNNER_TEMP/codweft-resolve-conflicts-result.json"
+            echo "CODWEFT_RESOLVE_CONFLICTS_RESULT_FILE=$RUNNER_TEMP/codweft-resolve-conflicts-result.json" >> "$GITHUB_ENV"
             echo "run_agent=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          git diff --name-only --diff-filter=U > "$RUNNER_TEMP/pi-conflict-files.txt"
-          conflict_count=$(wc -l < "$RUNNER_TEMP/pi-conflict-files.txt" | tr -d ' ')
+          git diff --name-only --diff-filter=U > "$RUNNER_TEMP/codweft-conflict-files.txt"
+          conflict_count=$(wc -l < "$RUNNER_TEMP/codweft-conflict-files.txt" | tr -d ' ')
 
           if [ "$conflict_count" -eq 0 ]; then
             message="The merge failed, but no conflicted files were detected. Please inspect this workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$message"
-            echo '{"status":"diagnostic","reason":"Merge failed without conflicted files."}' > "$RUNNER_TEMP/pi-resolve-conflicts-result.json"
-            echo "PI_RESOLVE_CONFLICTS_RESULT_FILE=$RUNNER_TEMP/pi-resolve-conflicts-result.json" >> "$GITHUB_ENV"
+            echo '{"status":"diagnostic","reason":"Merge failed without conflicted files."}' > "$RUNNER_TEMP/codweft-resolve-conflicts-result.json"
+            echo "CODWEFT_RESOLVE_CONFLICTS_RESULT_FILE=$RUNNER_TEMP/codweft-resolve-conflicts-result.json" >> "$GITHUB_ENV"
             echo "run_agent=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -226,9 +226,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          CONTEXT_FILE="$RUNNER_TEMP/pi-resolve-conflicts-context.md"
+          CONTEXT_FILE="$RUNNER_TEMP/codweft-resolve-conflicts-context.md"
           {
-            echo "# Pi Resolve Conflicts Context"
+            echo "# Codweft Resolve Conflicts Context"
             echo
             echo "- Repository: ${GITHUB_REPOSITORY}"
             echo "- Pull request: ${PR_URL}"
@@ -254,7 +254,7 @@ jobs:
             echo
             echo "## Conflicted Files"
             echo
-            cat "$RUNNER_TEMP/pi-conflict-files.txt"
+            cat "$RUNNER_TEMP/codweft-conflict-files.txt"
             echo
           } > "$CONTEXT_FILE"
 
@@ -267,16 +267,16 @@ jobs:
               echo '```'
               echo
             } >> "$CONTEXT_FILE"
-          done < "$RUNNER_TEMP/pi-conflict-files.txt"
+          done < "$RUNNER_TEMP/codweft-conflict-files.txt"
 
-          echo "PI_RESOLVE_CONFLICTS_CONTEXT_FILE=$CONTEXT_FILE" >> "$GITHUB_ENV"
-          echo "PI_RESOLVE_CONFLICTS_RESULT_FILE=$RUNNER_TEMP/pi-resolve-conflicts-result.json" >> "$GITHUB_ENV"
+          echo "CODWEFT_RESOLVE_CONFLICTS_CONTEXT_FILE=$CONTEXT_FILE" >> "$GITHUB_ENV"
+          echo "CODWEFT_RESOLVE_CONFLICTS_RESULT_FILE=$RUNNER_TEMP/codweft-resolve-conflicts-result.json" >> "$GITHUB_ENV"
 
-      - name: Install Pi Coding Agent
+      - name: Install coding agent
         if: steps.request.outputs.should_run == 'true' && steps.conflicts.outputs.run_agent == 'true'
         run: curl -fsSL https://pi.dev/install.sh | sh
 
-      - name: Run Pi conflict resolver
+      - name: Run Codweft conflict resolver
         if: steps.request.outputs.should_run == 'true' && steps.conflicts.outputs.run_agent == 'true'
         env:
           KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
@@ -294,14 +294,14 @@ jobs:
           export PATH="$HOME/.pi/bin:$PATH"
           set -o pipefail
 
-          PROMPT_FILE="$RUNNER_TEMP/pi-resolve-conflicts-prompt.txt"
+          PROMPT_FILE="$RUNNER_TEMP/codweft-resolve-conflicts-prompt.txt"
           cat > "$PROMPT_FILE" <<'PROMPT'
           You are an automated coding agent running in GitHub Actions.
 
           All user-facing comments, commit messages, pull request titles, and pull
           request descriptions MUST be written in English.
 
-          Read the full request context from the file at PI_RESOLVE_CONFLICTS_CONTEXT_FILE.
+          Read the full request context from the file at CODWEFT_RESOLVE_CONFLICTS_CONTEXT_FILE.
 
           Goal:
           - Resolve the active merge conflicts only.
@@ -339,24 +339,24 @@ jobs:
           - Use `gh pr create --base "$PR_BASE" --head "$BRANCH_NAME"` to open the stacked PR.
 
           Result marker:
-          - After opening a PR or posting a diagnostic, write JSON to PI_RESOLVE_CONFLICTS_RESULT_FILE:
+          - After opening a PR or posting a diagnostic, write JSON to CODWEFT_RESOLVE_CONFLICTS_RESULT_FILE:
             {"status":"pr-created","url":"<pull request url>"}
             or
             {"status":"diagnostic","reason":"<short reason>"}
           - Do not write secrets into the result file.
           PROMPT
 
-          RUN_PI="$RUNNER_TEMP/run-pi-resolve-conflicts.sh"
-          cat > "$RUN_PI" <<'EOS'
+          RUN_AGENT="$RUNNER_TEMP/run-codweft-resolve-conflicts.sh"
+          cat > "$RUN_AGENT" <<'EOS'
           #!/usr/bin/env bash
           exec pi --mode json --provider "$2" --model "$3" "$(cat "$1")"
           EOS
-          chmod +x "$RUN_PI"
+          chmod +x "$RUN_AGENT"
 
-          EVENTS_FILE="$RUNNER_TEMP/pi-resolve-conflicts-events.jsonl"
+          EVENTS_FILE="$RUNNER_TEMP/codweft-resolve-conflicts-events.jsonl"
           : > "$EVENTS_FILE"
 
-          run_pi_with_model() {
+          run_agent_with_model() {
             local provider="$1"
             local model="$2"
             local secret_name="$3"
@@ -369,7 +369,7 @@ jobs:
 
             echo "Trying ${provider}/${model}"
             set +e
-            script -qefc "$RUN_PI '$PROMPT_FILE' '$provider' '$model'" /dev/null \
+            script -qefc "$RUN_AGENT '$PROMPT_FILE' '$provider' '$model'" /dev/null \
               | tee -a "$EVENTS_FILE" \
               | jq --unbuffered -j '
                 def short($n): tostring | gsub("\\s+"; " ")
@@ -424,16 +424,16 @@ jobs:
                        then "[retry] end\n"
                   else empty end
               '
-            local pi_status=${PIPESTATUS[0]}
+            local agent_status=${PIPESTATUS[0]}
             set +e
 
-            if [ "$pi_status" -eq 0 ]; then
-              echo "Pi completed with ${provider}/${model}"
+            if [ "$agent_status" -eq 0 ]; then
+              echo "Agent completed with ${provider}/${model}"
               return 0
             fi
 
-            echo "Pi failed with ${provider}/${model} (exit ${pi_status}); trying next configured model"
-            return "$pi_status"
+            echo "Agent failed with ${provider}/${model} (exit ${agent_status}); trying next configured model"
+            return "$agent_status"
           }
 
           configured_models=0
@@ -449,7 +449,7 @@ jobs:
             fi
 
             set +e
-            run_pi_with_model "$provider" "$model" "$secret_name"
+            run_agent_with_model "$provider" "$model" "$secret_name"
             status=$?
             set -e
             if [ "$status" -eq 0 ]; then
@@ -458,9 +458,9 @@ jobs:
           done
 
           if [ "$configured_models" -eq 0 ]; then
-            echo "No Pi model API keys are configured. Configure at least one of KIMI_API_KEY, ZAI_API_KEY, or MINIMAX_API_KEY." >&2
+            echo "No model API keys are configured. Configure at least one of KIMI_API_KEY, ZAI_API_KEY, or MINIMAX_API_KEY." >&2
           else
-            echo "All configured Pi models failed." >&2
+            echo "All configured agent models failed." >&2
           fi
           exit 1
 
@@ -472,35 +472,35 @@ jobs:
           BRANCH_NAME: ${{ steps.request.outputs.branch_name }}
         run: |
           set -euo pipefail
-          if [ -f "$PI_RESOLVE_CONFLICTS_RESULT_FILE" ]; then
-            cat "$PI_RESOLVE_CONFLICTS_RESULT_FILE"
+          if [ -f "$CODWEFT_RESOLVE_CONFLICTS_RESULT_FILE" ]; then
+            cat "$CODWEFT_RESOLVE_CONFLICTS_RESULT_FILE"
             exit 0
           fi
 
           existing_pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH_NAME" --json url --jq '.[0].url // ""')
           if [ -n "$existing_pr" ]; then
-            echo "{\"status\":\"pr-created\",\"url\":\"$existing_pr\"}" > "$PI_RESOLVE_CONFLICTS_RESULT_FILE"
-            cat "$PI_RESOLVE_CONFLICTS_RESULT_FILE"
+            echo "{\"status\":\"pr-created\",\"url\":\"$existing_pr\"}" > "$CODWEFT_RESOLVE_CONFLICTS_RESULT_FILE"
+            cat "$CODWEFT_RESOLVE_CONFLICTS_RESULT_FILE"
             exit 0
           fi
 
           message="Pi conflict resolver finished without creating a pull request or diagnostic. Please inspect this workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$message"
-          echo '{"status":"diagnostic","reason":"No pull request was created."}' > "$PI_RESOLVE_CONFLICTS_RESULT_FILE"
-          cat "$PI_RESOLVE_CONFLICTS_RESULT_FILE"
+          echo '{"status":"diagnostic","reason":"No pull request was created."}' > "$CODWEFT_RESOLVE_CONFLICTS_RESULT_FILE"
+          cat "$CODWEFT_RESOLVE_CONFLICTS_RESULT_FILE"
 
       - name: Upload Pi conflict event transcript
         if: always() && steps.request.outputs.should_run == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: pi-resolve-conflicts-events-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/pi-resolve-conflicts-events.jsonl
+          name: codweft-resolve-conflicts-events-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codweft-resolve-conflicts-events.jsonl
           if-no-files-found: ignore
 
       - name: Upload Pi conflict context
         if: always() && steps.request.outputs.should_run == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: pi-resolve-conflicts-context-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/pi-resolve-conflicts-context.md
+          name: codweft-resolve-conflicts-context-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codweft-resolve-conflicts-context.md
           if-no-files-found: ignore

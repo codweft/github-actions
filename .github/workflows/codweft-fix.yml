@@ -1,4 +1,4 @@
-name: pi-fix
+name: codweft-fix
 
 on:
   workflow_call:
@@ -122,15 +122,15 @@ jobs:
               echo "trusted=$trusted" >> "$GITHUB_OUTPUT"
               echo "target_kind=$target_kind" >> "$GITHUB_OUTPUT"
               echo "issue_number=$pr_number" >> "$GITHUB_OUTPUT"
-              echo "message=Pi fix cannot safely create a stacked PR for forked pull request $pr_url." >> "$GITHUB_OUTPUT"
+              echo "message=Codweft fix cannot safely create a stacked PR for forked pull request $pr_url." >> "$GITHUB_OUTPUT"
               exit 0
             fi
             checkout_ref="$head_ref"
             pr_base="$head_ref"
-            branch_name="pi-fix/pr-${pr_number}-${GITHUB_RUN_ID}"
+            branch_name="codweft-fix/pr-${pr_number}-${GITHUB_RUN_ID}"
             source_url="$pr_url"
           else
-            branch_name="pi-fix/issue-${issue_number}-${GITHUB_RUN_ID}"
+            branch_name="codweft-fix/issue-${issue_number}-${GITHUB_RUN_ID}"
           fi
 
           if [ "$trusted" != "true" ]; then
@@ -138,7 +138,7 @@ jobs:
             echo "trusted=false" >> "$GITHUB_OUTPUT"
             echo "target_kind=$target_kind" >> "$GITHUB_OUTPUT"
             echo "issue_number=${issue_number:-$pr_number}" >> "$GITHUB_OUTPUT"
-            echo "message=The /pi-fix command can only be used by repository owners, members, or collaborators." >> "$GITHUB_OUTPUT"
+            echo "message=The @codweft fix command can only be used by repository owners, members, or collaborators." >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -223,9 +223,9 @@ jobs:
         run: |
           set -euo pipefail
           run_agent=true
-          CONTEXT_FILE="$RUNNER_TEMP/pi-fix-context.md"
+          CONTEXT_FILE="$RUNNER_TEMP/codweft-fix-context.md"
           {
-            echo "# Pi Fix Context"
+            echo "# Codweft Fix Context"
             echo
             echo "- Repository: ${GITHUB_REPOSITORY}"
             echo "- Target kind: ${TARGET_KIND}"
@@ -250,7 +250,7 @@ jobs:
                 ;;
             esac
 
-            threads_json="$RUNNER_TEMP/pi-fix-review-threads.json"
+            threads_json="$RUNNER_TEMP/codweft-fix-review-threads.json"
             gh api graphql \
               -f owner="$repo_owner" \
               -f repo="$repo_name" \
@@ -346,7 +346,7 @@ jobs:
             if [ "$fix_unresolved_mode" = "true" ] && [ "$unresolved_count" -eq 0 ]; then
               message="No unresolved review threads were found."
               gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$message"
-              echo '{"status":"diagnostic","reason":"No unresolved review threads were found."}' > "$RUNNER_TEMP/pi-fix-result.json"
+              echo '{"status":"diagnostic","reason":"No unresolved review threads were found."}' > "$RUNNER_TEMP/codweft-fix-result.json"
               run_agent=false
             fi
           else
@@ -357,15 +357,15 @@ jobs:
             } >> "$CONTEXT_FILE"
           fi
 
-          echo "PI_FIX_CONTEXT_FILE=$CONTEXT_FILE" >> "$GITHUB_ENV"
-          echo "PI_FIX_RESULT_FILE=$RUNNER_TEMP/pi-fix-result.json" >> "$GITHUB_ENV"
+          echo "CODWEFT_FIX_CONTEXT_FILE=$CONTEXT_FILE" >> "$GITHUB_ENV"
+          echo "CODWEFT_FIX_RESULT_FILE=$RUNNER_TEMP/codweft-fix-result.json" >> "$GITHUB_ENV"
           echo "run_agent=$run_agent" >> "$GITHUB_OUTPUT"
 
-      - name: Install Pi Coding Agent
+      - name: Install coding agent
         if: steps.request.outputs.should_run == 'true' && steps.context.outputs.run_agent != 'false'
         run: curl -fsSL https://pi.dev/install.sh | sh
 
-      - name: Run Pi fix
+      - name: Run Codweft fix
         if: steps.request.outputs.should_run == 'true' && steps.context.outputs.run_agent != 'false'
         env:
           KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
@@ -383,17 +383,17 @@ jobs:
           export PATH="$HOME/.pi/bin:$PATH"
           set -o pipefail
 
-          PROMPT_FILE="$RUNNER_TEMP/pi-fix-prompt.txt"
+          PROMPT_FILE="$RUNNER_TEMP/codweft-fix-prompt.txt"
           cat > "$PROMPT_FILE" <<'PROMPT'
           You are an automated coding agent running in GitHub Actions.
 
           All user-facing comments, commit messages, pull request titles, and pull
           request descriptions MUST be written in English.
 
-          Read the full request context from the file at PI_FIX_CONTEXT_FILE.
+          Read the full request context from the file at CODWEFT_FIX_CONTEXT_FILE.
 
           Goal:
-          - Understand the concrete problem requested by the /pi-fix command.
+          - Understand the concrete problem requested by the @codweft fix command.
           - If the command asks to fix all unresolved review threads, review comments,
             or equivalent wording, use the "Unresolved Review Threads" section as the
             primary source of truth and do not act on resolved or outdated feedback.
@@ -429,24 +429,24 @@ jobs:
           - Include the source URL from SOURCE_URL in the generated PR body.
 
           Result marker:
-          - After opening a PR or posting a diagnostic, write JSON to PI_FIX_RESULT_FILE:
+          - After opening a PR or posting a diagnostic, write JSON to CODWEFT_FIX_RESULT_FILE:
             {"status":"pr-created","url":"<pull request url>"}
             or
             {"status":"diagnostic","reason":"<short reason>"}
           - Do not write secrets into the result file.
           PROMPT
 
-          RUN_PI="$RUNNER_TEMP/run-pi-fix.sh"
-          cat > "$RUN_PI" <<'EOS'
+          RUN_AGENT="$RUNNER_TEMP/run-codweft-fix.sh"
+          cat > "$RUN_AGENT" <<'EOS'
           #!/usr/bin/env bash
           exec pi --mode json --provider "$2" --model "$3" "$(cat "$1")"
           EOS
-          chmod +x "$RUN_PI"
+          chmod +x "$RUN_AGENT"
 
-          EVENTS_FILE="$RUNNER_TEMP/pi-fix-events.jsonl"
+          EVENTS_FILE="$RUNNER_TEMP/codweft-fix-events.jsonl"
           : > "$EVENTS_FILE"
 
-          run_pi_with_model() {
+          run_agent_with_model() {
             local provider="$1"
             local model="$2"
             local secret_name="$3"
@@ -459,7 +459,7 @@ jobs:
 
             echo "Trying ${provider}/${model}"
             set +e
-            script -qefc "$RUN_PI '$PROMPT_FILE' '$provider' '$model'" /dev/null \
+            script -qefc "$RUN_AGENT '$PROMPT_FILE' '$provider' '$model'" /dev/null \
               | tee -a "$EVENTS_FILE" \
               | jq --unbuffered -j '
                 def short($n): tostring | gsub("\\s+"; " ")
@@ -514,16 +514,16 @@ jobs:
                        then "[retry] end\n"
                   else empty end
               '
-            local pi_status=${PIPESTATUS[0]}
+            local agent_status=${PIPESTATUS[0]}
             set +e
 
-            if [ "$pi_status" -eq 0 ]; then
-              echo "Pi completed with ${provider}/${model}"
+            if [ "$agent_status" -eq 0 ]; then
+              echo "Agent completed with ${provider}/${model}"
               return 0
             fi
 
-            echo "Pi failed with ${provider}/${model} (exit ${pi_status}); trying next configured model"
-            return "$pi_status"
+            echo "Agent failed with ${provider}/${model} (exit ${agent_status}); trying next configured model"
+            return "$agent_status"
           }
 
           configured_models=0
@@ -539,7 +539,7 @@ jobs:
             fi
 
             set +e
-            run_pi_with_model "$provider" "$model" "$secret_name"
+            run_agent_with_model "$provider" "$model" "$secret_name"
             status=$?
             set -e
             if [ "$status" -eq 0 ]; then
@@ -548,13 +548,13 @@ jobs:
           done
 
           if [ "$configured_models" -eq 0 ]; then
-            echo "No Pi model API keys are configured. Configure at least one of KIMI_API_KEY, ZAI_API_KEY, or MINIMAX_API_KEY." >&2
+            echo "No model API keys are configured. Configure at least one of KIMI_API_KEY, ZAI_API_KEY, or MINIMAX_API_KEY." >&2
           else
-            echo "All configured Pi models failed." >&2
+            echo "All configured agent models failed." >&2
           fi
           exit 1
 
-      - name: Verify Pi fix result
+      - name: Verify Codweft fix result
         if: steps.request.outputs.should_run == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -564,39 +564,39 @@ jobs:
           BRANCH_NAME: ${{ steps.request.outputs.branch_name }}
         run: |
           set -euo pipefail
-          if [ -f "$PI_FIX_RESULT_FILE" ]; then
-            cat "$PI_FIX_RESULT_FILE"
+          if [ -f "$CODWEFT_FIX_RESULT_FILE" ]; then
+            cat "$CODWEFT_FIX_RESULT_FILE"
             exit 0
           fi
 
           existing_pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH_NAME" --json url --jq '.[0].url // ""')
           if [ -n "$existing_pr" ]; then
-            echo "{\"status\":\"pr-created\",\"url\":\"$existing_pr\"}" > "$PI_FIX_RESULT_FILE"
-            cat "$PI_FIX_RESULT_FILE"
+            echo "{\"status\":\"pr-created\",\"url\":\"$existing_pr\"}" > "$CODWEFT_FIX_RESULT_FILE"
+            cat "$CODWEFT_FIX_RESULT_FILE"
             exit 0
           fi
 
-          message="Pi fix finished without creating a pull request or diagnostic. Please inspect this workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          message="Codweft fix finished without creating a pull request or diagnostic. Please inspect this workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           if [ "$TARGET_KIND" = "pull_request" ]; then
             gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$message"
           else
             gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$message"
           fi
-          echo '{"status":"diagnostic","reason":"No pull request was created."}' > "$PI_FIX_RESULT_FILE"
-          cat "$PI_FIX_RESULT_FILE"
+          echo '{"status":"diagnostic","reason":"No pull request was created."}' > "$CODWEFT_FIX_RESULT_FILE"
+          cat "$CODWEFT_FIX_RESULT_FILE"
 
-      - name: Upload Pi fix event transcript
+      - name: Upload Codweft fix event transcript
         if: always() && steps.request.outputs.should_run == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: pi-fix-events-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/pi-fix-events.jsonl
+          name: codweft-fix-events-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codweft-fix-events.jsonl
           if-no-files-found: ignore
 
-      - name: Upload Pi fix context
+      - name: Upload Codweft fix context
         if: always() && steps.request.outputs.should_run == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: pi-fix-context-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/pi-fix-context.md
+          name: codweft-fix-context-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codweft-fix-context.md
           if-no-files-found: ignore

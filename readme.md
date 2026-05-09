@@ -4,7 +4,7 @@ Reusable GitHub Actions workflows and automations.
 
 ## Workflows
 
-All Pi workflows try configured models in this order:
+All Codweft workflows try configured models in this order:
 
 1. `kimi-coding / kimi-for-coding` with `KIMI_API_KEY`
 2. `zai / glm-5.1` with `ZAI_API_KEY`
@@ -13,10 +13,10 @@ All Pi workflows try configured models in this order:
 If a secret is not configured, that model is skipped. At least one of these
 secrets must be configured in each caller repository or organization.
 
-### `pi-review`
+### `codweft-review`
 
-Reusable pull request review workflow powered by Pi Coding Agent.
-Use `/pi-review` for comment-triggered reviews. The shorter `/review` alias is
+Reusable pull request review workflow powered by coding agent.
+Use `@codweft review` for comment-triggered reviews. The shorter `/review` alias is
 intentionally not supported so repositories can avoid command conflicts with
 other tools.
 
@@ -25,7 +25,7 @@ Caller workflow:
 ```yaml
 jobs:
   review:
-    uses: leynier/github-actions/.github/workflows/pi-review.yml@main
+    uses: codweft/github-actions/.github/workflows/codweft-review.yml@main
     permissions:
       contents: read
       pull-requests: write
@@ -40,17 +40,17 @@ jobs:
 
 The caller repository must define at least one supported model API key.
 
-### `pi-fix`
+### `codweft-fix`
 
 Reusable workflow that lets trusted repository users request an automated fix
-from issue and pull request comments with `/pi-fix`.
+from issue and pull request comments with `@codweft fix`.
 
 Caller workflow:
 
 ```yaml
 jobs:
   fix:
-    uses: leynier/github-actions/.github/workflows/pi-fix.yml@main
+    uses: codweft/github-actions/.github/workflows/codweft-fix.yml@main
     permissions:
       contents: write
       pull-requests: write
@@ -70,25 +70,25 @@ The caller repository must define at least one supported model API key. The
 workflow only honors comment-triggered requests from owners, members, or
 collaborators.
 
-For pull request targets, `pi-fix` also loads unresolved, non-outdated review
-threads through GitHub GraphQL. Commands such as `/pi-fix fix all unresolved
+For pull request targets, `codweft-fix` also loads unresolved, non-outdated review
+threads through GitHub GraphQL. Commands such as `@codweft fix all unresolved
 review threads` use that structured thread context as the primary source.
 
-### `pi-implement`
+### `codweft-implement`
 
-Reusable workflow that lets trusted repository users ask Pi to implement a full
-issue with `/pi-implement` or by adding the `ready-for-pi` label.
+Reusable workflow that lets trusted repository users ask Codweft to implement a full
+issue with `@codweft implement` or by adding the `ready-for-codweft` label.
 
 The workflow asks clarifying questions when the issue is not ready. When the
 issue is clear, it creates a draft pull request, implements the issue, marks the
-pull request ready, and comments `/pi-review` on the generated pull request.
+pull request ready, and comments `@codweft review` on the generated pull request.
 
 Caller workflow:
 
 ```yaml
 jobs:
   implement:
-    uses: leynier/github-actions/.github/workflows/pi-implement.yml@main
+    uses: codweft/github-actions/.github/workflows/codweft-implement.yml@main
     permissions:
       contents: write
       pull-requests: write
@@ -103,10 +103,10 @@ jobs:
       MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
 ```
 
-### `pi-resolve-conflicts`
+### `codweft-resolve-conflicts`
 
 Reusable workflow that lets trusted repository users request an automated merge
-conflict resolution from pull request comments with `/pi-resolve-conflicts`.
+conflict resolution from pull request comments with `@codweft resolve conflicts`.
 
 The workflow creates a separate stacked pull request against the original pull
 request head branch and includes the resolution decisions in the generated pull
@@ -117,7 +117,7 @@ Caller workflow:
 ```yaml
 jobs:
   resolve-conflicts:
-    uses: leynier/github-actions/.github/workflows/pi-resolve-conflicts.yml@main
+    uses: codweft/github-actions/.github/workflows/codweft-resolve-conflicts.yml@main
     permissions:
       contents: write
       pull-requests: write
