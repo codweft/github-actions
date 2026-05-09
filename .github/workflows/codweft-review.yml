@@ -8,6 +8,21 @@ on:
         required: false
         type: string
         default: ""
+      codweft_command_id:
+        description: "Codweft command correlation id"
+        required: false
+        type: string
+        default: ""
+      source_url:
+        description: "GitHub source URL that triggered the command"
+        required: false
+        type: string
+        default: ""
+      codweft_api_origin:
+        description: "Codweft API origin for App-authored comments"
+        required: false
+        type: string
+        default: "https://codweft.com"
     secrets:
       KIMI_API_KEY:
         required: false
@@ -23,6 +38,7 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
+      id-token: write
     steps:
       - name: Resolve PR context
         id: pr
@@ -61,16 +77,104 @@ jobs:
               ;;
           esac
 
+      - name: Install Codweft GitHub helper
+        env:
+          CODWEFT_API_ORIGIN: ${{ inputs.codweft_api_origin }}
+          CODWEFT_REPOSITORY_ID: ${{ github.repository_id }}
+        run: |
+          set -euo pipefail
+          helper_dir="$RUNNER_TEMP/codweft-bin"
+          mkdir -p "$helper_dir"
+
+          cat > "$helper_dir/codweft-api" <<'BASH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          path="$1"
+          body_file="$2"
+          api_origin="${CODWEFT_API_ORIGIN:-https://codweft.com}"
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "GitHub Actions OIDC is unavailable. Ensure id-token: write is granted." >&2
+            exit 1
+          fi
+          oidc_token=$(curl -fsSL \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=codweft" | jq -r '.value')
+          curl -fsSL \
+            -X POST "${api_origin%/}${path}" \
+            -H "Authorization: Bearer ${oidc_token}" \
+            -H "Content-Type: application/json" \
+            --data-binary "@${body_file}"
+          BASH
+
+          cat > "$helper_dir/codweft-comment" <<'BASH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [ "$#" -ne 4 ]; then
+            echo "Usage: codweft-comment issue|pr NUMBER --body BODY|--body-file FILE" >&2
+            exit 2
+          fi
+          case "$1" in
+            issue) target="issue" ;;
+            pr|pull_request) target="pull_request" ;;
+            *) echo "Unknown comment target: $1" >&2; exit 2 ;;
+          esac
+          number="$2"
+          case "$3" in
+            --body) body="$4" ;;
+            --body-file) body="$(cat "$4")" ;;
+            *) echo "Expected --body or --body-file" >&2; exit 2 ;;
+          esac
+          body_file=$(mktemp)
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --argjson repositoryId "$CODWEFT_REPOSITORY_ID" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg target "$target" \
+            --argjson number "$number" \
+            --arg body "$body" \
+            '{repository:$repository, repositoryId:$repositoryId, runId:$runId, target:$target, number:$number, body:$body}' \
+            > "$body_file"
+          codweft-api /api/github/actions/comment "$body_file" >/dev/null
+          BASH
+
+          cat > "$helper_dir/codweft-react" <<'BASH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [ "$#" -ne 3 ]; then
+            echo "Usage: codweft-react issue-comment|pr-review-comment COMMENT_ID CONTENT" >&2
+            exit 2
+          fi
+          case "$1" in
+            issue-comment) target="issue_comment" ;;
+            pr-review-comment) target="pull_request_review_comment" ;;
+            *) echo "Unknown reaction target: $1" >&2; exit 2 ;;
+          esac
+          body_file=$(mktemp)
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --argjson repositoryId "$CODWEFT_REPOSITORY_ID" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg target "$target" \
+            --argjson commentId "$2" \
+            --arg content "$3" \
+            '{repository:$repository, repositoryId:$repositoryId, runId:$runId, target:$target, commentId:$commentId, content:$content}' \
+            > "$body_file"
+          codweft-api /api/github/actions/reaction "$body_file" >/dev/null
+          BASH
+
+          chmod +x "$helper_dir/codweft-api" "$helper_dir/codweft-comment" "$helper_dir/codweft-react"
+          {
+            echo "CODWEFT_API_ORIGIN=${CODWEFT_API_ORIGIN:-https://codweft.com}"
+            echo "CODWEFT_REPOSITORY_ID=${CODWEFT_REPOSITORY_ID}"
+          } >> "$GITHUB_ENV"
+          echo "$helper_dir" >> "$GITHUB_PATH"
+
       - name: React to trigger comment
         if: github.event_name == 'issue_comment'
         env:
-          GH_TOKEN: ${{ github.token }}
+          COMMENT_ID: ${{ github.event.comment.id }}
         run: |
-          gh api \
-            --method POST \
-            -H "Accept: application/vnd.github+json" \
-            "/repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
-            -f content="eyes" || true
+          codweft-react issue-comment "$COMMENT_ID" eyes || true
 
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -108,9 +212,9 @@ jobs:
           STEP 1 — Announce the review has started
           ============================================================
           Before doing anything else, post a single PR-level comment so the author knows
-          the automated review is in progress. Use:
+          the automated review is in progress. Use the Codweft GitHub App helper:
 
-            gh pr comment "$PR_NUMBER" --body "🔍 Starting automated review of this pull request..."
+            codweft-comment pr "$PR_NUMBER" --body "🔍 Starting automated review of this pull request..."
 
           ============================================================
           STEP 2 — Read the diff and the PR description
@@ -188,14 +292,14 @@ jobs:
           ============================================================
           If you posted at least one finding:
 
-            gh pr comment "$PR_NUMBER" --body "✅ Review complete. Found N issue(s):
+            codweft-comment pr "$PR_NUMBER" --body "✅ Review complete. Found N issue(s):
             - [P1] <title>
             - [P2] <title>
             Overall: patch needs changes."
 
           If you found NO issues:
 
-            gh pr comment "$PR_NUMBER" --body "✅ Review complete. No issues were found in this pull request."
+            codweft-comment pr "$PR_NUMBER" --body "✅ Review complete. No issues were found in this pull request."
 
           Do not post duplicate summaries. Do not wrap output in JSON. Do not include
           any text outside of these comments.

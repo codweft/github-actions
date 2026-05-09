@@ -13,6 +13,21 @@ on:
         required: false
         type: string
         default: ""
+      codweft_command_id:
+        description: "Codweft command correlation id"
+        required: false
+        type: string
+        default: ""
+      source_url:
+        description: "GitHub source URL that triggered the command"
+        required: false
+        type: string
+        default: ""
+      codweft_api_origin:
+        description: "Codweft API origin for App-authored comments"
+        required: false
+        type: string
+        default: "https://codweft.com"
     secrets:
       KIMI_API_KEY:
         required: false
@@ -29,6 +44,7 @@ jobs:
       pull-requests: write
       issues: write
       actions: read
+      id-token: write
     steps:
       - name: Resolve request
         id: request
@@ -37,6 +53,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           INPUT_PR_NUMBER: ${{ inputs.pr_number }}
           INPUT_INSTRUCTION: ${{ inputs.instruction }}
+          INPUT_SOURCE_URL: ${{ inputs.source_url }}
           EVENT_COMMENT_BODY: ${{ github.event.comment.body }}
           EVENT_COMMENT_URL: ${{ github.event.comment.html_url }}
           EVENT_AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
@@ -49,7 +66,7 @@ jobs:
           pr_number=""
           command_body=""
           comment_target="pull_request"
-          source_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          source_url="${INPUT_SOURCE_URL:-https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}}"
 
           case "${{ github.event_name }}" in
             issue_comment)
@@ -125,33 +142,119 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Install Codweft GitHub helper
+        env:
+          CODWEFT_API_ORIGIN: ${{ inputs.codweft_api_origin }}
+          CODWEFT_REPOSITORY_ID: ${{ github.repository_id }}
+        run: |
+          set -euo pipefail
+          helper_dir="$RUNNER_TEMP/codweft-bin"
+          mkdir -p "$helper_dir"
+
+          cat > "$helper_dir/codweft-api" <<'BASH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          path="$1"
+          body_file="$2"
+          api_origin="${CODWEFT_API_ORIGIN:-https://codweft.com}"
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "GitHub Actions OIDC is unavailable. Ensure id-token: write is granted." >&2
+            exit 1
+          fi
+          oidc_token=$(curl -fsSL \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=codweft" | jq -r '.value')
+          curl -fsSL \
+            -X POST "${api_origin%/}${path}" \
+            -H "Authorization: Bearer ${oidc_token}" \
+            -H "Content-Type: application/json" \
+            --data-binary "@${body_file}"
+          BASH
+
+          cat > "$helper_dir/codweft-comment" <<'BASH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [ "$#" -ne 4 ]; then
+            echo "Usage: codweft-comment issue|pr NUMBER --body BODY|--body-file FILE" >&2
+            exit 2
+          fi
+          case "$1" in
+            issue) target="issue" ;;
+            pr|pull_request) target="pull_request" ;;
+            *) echo "Unknown comment target: $1" >&2; exit 2 ;;
+          esac
+          number="$2"
+          case "$3" in
+            --body) body="$4" ;;
+            --body-file) body="$(cat "$4")" ;;
+            *) echo "Expected --body or --body-file" >&2; exit 2 ;;
+          esac
+          body_file=$(mktemp)
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --argjson repositoryId "$CODWEFT_REPOSITORY_ID" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg target "$target" \
+            --argjson number "$number" \
+            --arg body "$body" \
+            '{repository:$repository, repositoryId:$repositoryId, runId:$runId, target:$target, number:$number, body:$body}' \
+            > "$body_file"
+          codweft-api /api/github/actions/comment "$body_file" >/dev/null
+          BASH
+
+          cat > "$helper_dir/codweft-react" <<'BASH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [ "$#" -ne 3 ]; then
+            echo "Usage: codweft-react issue-comment|pr-review-comment COMMENT_ID CONTENT" >&2
+            exit 2
+          fi
+          case "$1" in
+            issue-comment) target="issue_comment" ;;
+            pr-review-comment) target="pull_request_review_comment" ;;
+            *) echo "Unknown reaction target: $1" >&2; exit 2 ;;
+          esac
+          body_file=$(mktemp)
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --argjson repositoryId "$CODWEFT_REPOSITORY_ID" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg target "$target" \
+            --argjson commentId "$2" \
+            --arg content "$3" \
+            '{repository:$repository, repositoryId:$repositoryId, runId:$runId, target:$target, commentId:$commentId, content:$content}' \
+            > "$body_file"
+          codweft-api /api/github/actions/reaction "$body_file" >/dev/null
+          BASH
+
+          chmod +x "$helper_dir/codweft-api" "$helper_dir/codweft-comment" "$helper_dir/codweft-react"
+          {
+            echo "CODWEFT_API_ORIGIN=${CODWEFT_API_ORIGIN:-https://codweft.com}"
+            echo "CODWEFT_REPOSITORY_ID=${CODWEFT_REPOSITORY_ID}"
+          } >> "$GITHUB_ENV"
+          echo "$helper_dir" >> "$GITHUB_PATH"
+
       - name: Comment when request is rejected
         if: steps.request.outputs.should_run == 'false'
         env:
-          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.request.outputs.pr_number }}
           COMMENT_TARGET: ${{ steps.request.outputs.comment_target }}
           MESSAGE: ${{ steps.request.outputs.message }}
         run: |
           set -euo pipefail
           if [ "$COMMENT_TARGET" = "issue" ]; then
-            gh issue comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$MESSAGE"
+            codweft-comment issue "$PR_NUMBER" --body "$MESSAGE"
           else
-            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$MESSAGE"
+            codweft-comment pr "$PR_NUMBER" --body "$MESSAGE"
           fi
 
       - name: React to trigger comment
         if: steps.request.outputs.should_run == 'true' && github.event_name == 'issue_comment'
         env:
-          GH_TOKEN: ${{ github.token }}
           COMMENT_ID: ${{ github.event.comment.id }}
         run: |
           set -euo pipefail
-          gh api \
-            --method POST \
-            -H "Accept: application/vnd.github+json" \
-            "/repos/${{ github.repository }}/issues/comments/${COMMENT_ID}/reactions" \
-            -f content="eyes" || true
+          codweft-react issue-comment "$COMMENT_ID" eyes || true
 
       - name: Checkout pull request head
         if: steps.request.outputs.should_run == 'true'
@@ -190,7 +293,7 @@ jobs:
           if [ "$merge_status" -eq 0 ]; then
             git merge --abort || true
             message="No merge conflicts were found when merging ${BASE_REF} into this pull request head."
-            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$message"
+            codweft-comment pr "$PR_NUMBER" --body "$message"
             echo '{"status":"diagnostic","reason":"No merge conflicts were found."}' > "$RUNNER_TEMP/codweft-resolve-conflicts-result.json"
             echo "CODWEFT_RESOLVE_CONFLICTS_RESULT_FILE=$RUNNER_TEMP/codweft-resolve-conflicts-result.json" >> "$GITHUB_ENV"
             echo "run_agent=false" >> "$GITHUB_OUTPUT"
@@ -202,7 +305,7 @@ jobs:
 
           if [ "$conflict_count" -eq 0 ]; then
             message="The merge failed, but no conflicted files were detected. Please inspect this workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$message"
+            codweft-comment pr "$PR_NUMBER" --body "$message"
             echo '{"status":"diagnostic","reason":"Merge failed without conflicted files."}' > "$RUNNER_TEMP/codweft-resolve-conflicts-result.json"
             echo "CODWEFT_RESOLVE_CONFLICTS_RESULT_FILE=$RUNNER_TEMP/codweft-resolve-conflicts-result.json" >> "$GITHUB_ENV"
             echo "run_agent=false" >> "$GITHUB_OUTPUT"
@@ -330,12 +433,13 @@ jobs:
 
           Failure policy:
           - If the conflicts cannot be resolved with confidence, do NOT create a PR.
-          - Instead, comment a concise diagnostic on the original pull request:
+          - Instead, comment a concise diagnostic on the original pull request
+            using codweft-comment:
             what you checked, why you did not produce a resolution, and the next
             concrete step needed from a human.
 
           GitHub commands:
-          - Use `gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"` for the original PR.
+          - Use `codweft-comment pr "$PR_NUMBER" --body "<body>"` for original PR comments.
           - Use `gh pr create --base "$PR_BASE" --head "$BRANCH_NAME"` to open the stacked PR.
 
           Result marker:
@@ -464,7 +568,7 @@ jobs:
           fi
           exit 1
 
-      - name: Verify Pi conflict result
+      - name: Verify Codweft conflict result
         if: steps.request.outputs.should_run == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -484,12 +588,12 @@ jobs:
             exit 0
           fi
 
-          message="Pi conflict resolver finished without creating a pull request or diagnostic. Please inspect this workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$message"
+          message="Codweft conflict resolver finished without creating a pull request or diagnostic. Please inspect this workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          codweft-comment pr "$PR_NUMBER" --body "$message"
           echo '{"status":"diagnostic","reason":"No pull request was created."}' > "$CODWEFT_RESOLVE_CONFLICTS_RESULT_FILE"
           cat "$CODWEFT_RESOLVE_CONFLICTS_RESULT_FILE"
 
-      - name: Upload Pi conflict event transcript
+      - name: Upload Codweft conflict event transcript
         if: always() && steps.request.outputs.should_run == 'true'
         uses: actions/upload-artifact@v4
         with:
@@ -497,7 +601,7 @@ jobs:
           path: ${{ runner.temp }}/codweft-resolve-conflicts-events.jsonl
           if-no-files-found: ignore
 
-      - name: Upload Pi conflict context
+      - name: Upload Codweft conflict context
         if: always() && steps.request.outputs.should_run == 'true'
         uses: actions/upload-artifact@v4
         with:

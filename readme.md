@@ -6,7 +6,7 @@ The Codweft GitHub App installs a single router workflow
 calls these reusables by version tag, e.g.:
 
 ```yaml
-uses: codweft/github-actions/.github/workflows/codweft-review.yml@v0.2.0
+uses: codweft/github-actions/.github/workflows/codweft-review.yml@v0.3.0
 ```
 
 You can read every workflow before you ship it. That is the point.
@@ -41,13 +41,17 @@ Caller workflow:
 ```yaml
 jobs:
   review:
-    uses: codweft/github-actions/.github/workflows/codweft-review.yml@main
+    uses: codweft/github-actions/.github/workflows/codweft-review.yml@v0.3.0
     permissions:
       contents: read
       pull-requests: write
       issues: write
+      id-token: write
     with:
       pr_number: ${{ inputs.pr_number || '' }}
+      codweft_command_id: ${{ inputs.codweft_command_id || '' }}
+      source_url: ${{ inputs.source_url || '' }}
+      codweft_api_origin: https://codweft.com
     secrets:
       KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
       ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
@@ -66,16 +70,20 @@ Caller workflow:
 ```yaml
 jobs:
   fix:
-    uses: codweft/github-actions/.github/workflows/codweft-fix.yml@main
+    uses: codweft/github-actions/.github/workflows/codweft-fix.yml@v0.3.0
     permissions:
       contents: write
       pull-requests: write
       issues: write
       actions: read
+      id-token: write
     with:
       issue_number: ${{ github.event.inputs.issue_number || '' }}
       pr_number: ${{ github.event.inputs.pr_number || '' }}
       instruction: ${{ github.event.inputs.instruction || '' }}
+      codweft_command_id: ${{ inputs.codweft_command_id || '' }}
+      source_url: ${{ inputs.source_url || '' }}
+      codweft_api_origin: https://codweft.com
     secrets:
       KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
       ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
@@ -104,15 +112,19 @@ Caller workflow:
 ```yaml
 jobs:
   implement:
-    uses: codweft/github-actions/.github/workflows/codweft-implement.yml@main
+    uses: codweft/github-actions/.github/workflows/codweft-implement.yml@v0.3.0
     permissions:
       contents: write
       pull-requests: write
       issues: write
       actions: write
+      id-token: write
     with:
       issue_number: ${{ github.event.inputs.issue_number || '' }}
       instruction: ${{ github.event.inputs.instruction || '' }}
+      codweft_command_id: ${{ inputs.codweft_command_id || '' }}
+      source_url: ${{ inputs.source_url || '' }}
+      codweft_api_origin: https://codweft.com
     secrets:
       KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
       ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
@@ -133,15 +145,19 @@ Caller workflow:
 ```yaml
 jobs:
   resolve-conflicts:
-    uses: codweft/github-actions/.github/workflows/codweft-resolve-conflicts.yml@main
+    uses: codweft/github-actions/.github/workflows/codweft-resolve-conflicts.yml@v0.3.0
     permissions:
       contents: write
       pull-requests: write
       issues: write
       actions: read
+      id-token: write
     with:
       pr_number: ${{ github.event.inputs.pr_number || '' }}
       instruction: ${{ github.event.inputs.instruction || '' }}
+      codweft_command_id: ${{ inputs.codweft_command_id || '' }}
+      source_url: ${{ inputs.source_url || '' }}
+      codweft_api_origin: https://codweft.com
     secrets:
       KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
       ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
