@@ -1,6 +1,22 @@
 # github-actions
 
-Reusable GitHub Actions workflows and automations.
+Reusable GitHub Actions workflows that power [Codweft](https://codweft.com).
+The Codweft GitHub App installs a single router workflow
+(`.github/workflows/codweft.yml`) in destination repositories; the router
+calls these reusables by version tag, e.g.:
+
+```yaml
+uses: codweft/github-actions/.github/workflows/codweft-review.yml@v0.2.0
+```
+
+You can read every workflow before you ship it — that's the point.
+
+## Versioning
+
+This repository is published as semantic version tags (`v0.2.0`, `v0.3.0`,
+…). The Codweft control plane pins a specific tag per destination repo and
+opens a pull request when it wants to bump the pinned version. **Do not use
+`@main` in production callers** — pin a tag.
 
 ## Workflows
 
