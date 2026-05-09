@@ -24,6 +24,9 @@ on:
 jobs:
   implement:
     runs-on: ubuntu-latest
+    outputs:
+      should_review: ${{ steps.result.outputs.should_review }}
+      pr_number: ${{ steps.result.outputs.pr_number }}
     permissions:
       contents: write
       pull-requests: write
@@ -406,6 +409,7 @@ jobs:
           exit 1
 
       - name: Verify Pi implement result
+        id: result
         if: steps.request.outputs.should_run == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -415,6 +419,14 @@ jobs:
           set -euo pipefail
           if [ -f "$PI_IMPLEMENT_RESULT_FILE" ]; then
             cat "$PI_IMPLEMENT_RESULT_FILE"
+            status=$(jq -r '.status // ""' "$PI_IMPLEMENT_RESULT_FILE")
+            url=$(jq -r '.url // ""' "$PI_IMPLEMENT_RESULT_FILE")
+            if [ "$status" = "pr-ready" ] && [ -n "$url" ] && [ "$url" != "null" ]; then
+              echo "should_review=true" >> "$GITHUB_OUTPUT"
+              echo "pr_number=${url##*/}" >> "$GITHUB_OUTPUT"
+            else
+              echo "should_review=false" >> "$GITHUB_OUTPUT"
+            fi
             exit 0
           fi
 
@@ -428,6 +440,12 @@ jobs:
               echo "{\"status\":\"pr-ready\",\"url\":\"$url\"}" > "$PI_IMPLEMENT_RESULT_FILE"
             fi
             cat "$PI_IMPLEMENT_RESULT_FILE"
+            if [ "$is_draft" = "true" ]; then
+              echo "should_review=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "should_review=true" >> "$GITHUB_OUTPUT"
+              echo "pr_number=${url##*/}" >> "$GITHUB_OUTPUT"
+            fi
             exit 0
           fi
 
@@ -435,31 +453,7 @@ jobs:
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$message"
           echo '{"status":"diagnostic","reason":"No pull request was created."}' > "$PI_IMPLEMENT_RESULT_FILE"
           cat "$PI_IMPLEMENT_RESULT_FILE"
-
-      - name: Trigger Pi review for ready PR
-        if: steps.request.outputs.should_run == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_BASE: ${{ steps.request.outputs.pr_base }}
-        run: |
-          set -euo pipefail
-          if [ ! -f "$PI_IMPLEMENT_RESULT_FILE" ]; then
-            exit 0
-          fi
-
-          status=$(jq -r '.status // ""' "$PI_IMPLEMENT_RESULT_FILE")
-          if [ "$status" != "pr-ready" ]; then
-            exit 0
-          fi
-
-          url=$(jq -r '.url // ""' "$PI_IMPLEMENT_RESULT_FILE")
-          if [ -z "$url" ] || [ "$url" = "null" ]; then
-            exit 0
-          fi
-
-          pr_number="${url##*/}"
-          gh pr comment "$pr_number" --repo "$GITHUB_REPOSITORY" --body "/pi-review" || true
-          gh workflow run pi-review.yml --repo "$GITHUB_REPOSITORY" --ref "$PR_BASE" -f pr_number="$pr_number"
+          echo "should_review=false" >> "$GITHUB_OUTPUT"
 
       - name: Upload Pi implement event transcript
         if: always() && steps.request.outputs.should_run == 'true'
@@ -476,3 +470,15 @@ jobs:
           name: pi-implement-context-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/pi-implement-context.md
           if-no-files-found: ignore
+
+  review-created-pr:
+    needs: implement
+    if: needs.implement.outputs.should_review == 'true'
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    uses: codweft/github-actions/.github/workflows/pi-review.yml@v0.1.0
+    with:
+      pr_number: ${{ needs.implement.outputs.pr_number }}
+    secrets: inherit
