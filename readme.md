@@ -9,14 +9,14 @@ calls these reusables by version tag, e.g.:
 uses: codweft/github-actions/.github/workflows/codweft-review.yml@v0.2.0
 ```
 
-You can read every workflow before you ship it — that's the point.
+You can read every workflow before you ship it. That is the point.
 
 ## Versioning
 
 This repository is published as semantic version tags (`v0.2.0`, `v0.3.0`,
 …). The Codweft control plane pins a specific tag per destination repo and
 opens a pull request when it wants to bump the pinned version. **Do not use
-`@main` in production callers** — pin a tag.
+`@main` in production callers**. Pin a tag.
 
 ## Workflows
 
