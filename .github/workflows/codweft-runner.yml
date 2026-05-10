@@ -1,0 +1,129 @@
+name: codweft-runner
+
+on:
+  workflow_call:
+    inputs:
+      codweft_job_id:
+        description: "Codweft execution job id"
+        required: true
+        type: string
+      codweft_bootstrap_nonce:
+        description: "One-time Codweft runner bootstrap nonce"
+        required: true
+        type: string
+      codweft_command_id:
+        description: "Codweft command correlation id"
+        required: true
+        type: string
+      command:
+        description: "Command to run"
+        required: true
+        type: string
+      issue_number:
+        description: "Target issue number when applicable"
+        required: false
+        type: string
+        default: ""
+      pr_number:
+        description: "Target pull request number when applicable"
+        required: false
+        type: string
+        default: ""
+      instruction:
+        description: "Original Codweft instruction"
+        required: false
+        type: string
+        default: ""
+      source_url:
+        description: "GitHub source URL that triggered the command"
+        required: false
+        type: string
+        default: ""
+      codweft_api_origin:
+        description: "Codweft API origin"
+        required: false
+        type: string
+        default: "https://codweft.com"
+      runner_package:
+        description: "Pinned Codweft runner package spec"
+        required: false
+        type: string
+        default: "@codweft/runner@0.4.0"
+    secrets:
+      KIMI_API_KEY:
+        required: false
+      ZAI_API_KEY:
+        required: false
+      MINIMAX_API_KEY:
+        required: false
+
+jobs:
+  codweft:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write
+    env:
+      CODWEFT_API_URL: ${{ inputs.codweft_api_origin }}
+      CODWEFT_JOB_ID: ${{ inputs.codweft_job_id }}
+      CODWEFT_COMMAND_ID: ${{ inputs.codweft_command_id }}
+      CODWEFT_BOOTSTRAP_NONCE: ${{ inputs.codweft_bootstrap_nonce }}
+      KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+      ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+      MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+    steps:
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Request Codweft runner bootstrap token
+        id: bootstrap
+        env:
+          CODWEFT_REPOSITORY: ${{ github.repository }}
+          CODWEFT_REPOSITORY_ID: ${{ github.repository_id }}
+          CODWEFT_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "GitHub Actions OIDC is unavailable. Ensure id-token: write is granted." >&2
+            exit 1
+          fi
+          oidc_token=$(curl -fsSL \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=codweft" | jq -r '.value')
+          body_file=$(mktemp)
+          jq -n \
+            --arg jobId "$CODWEFT_JOB_ID" \
+            --arg commandId "$CODWEFT_COMMAND_ID" \
+            --arg bootstrapNonce "$CODWEFT_BOOTSTRAP_NONCE" \
+            --arg repository "$CODWEFT_REPOSITORY" \
+            --argjson repositoryId "$CODWEFT_REPOSITORY_ID" \
+            --arg runId "$CODWEFT_RUN_ID" \
+            '{jobId:$jobId, commandId:$commandId, bootstrapNonce:$bootstrapNonce, repository:$repository, repositoryId:$repositoryId, runId:$runId}' \
+            > "$body_file"
+          bootstrap_token=$(curl -fsSL \
+            -X POST "${CODWEFT_API_URL%/}/api/runner/bootstrap" \
+            -H "Authorization: Bearer ${oidc_token}" \
+            -H "Content-Type: application/json" \
+            --data-binary "@${body_file}" | jq -r '.bootstrapToken')
+          if [ -z "$bootstrap_token" ] || [ "$bootstrap_token" = "null" ]; then
+            echo "Codweft did not return a bootstrap token." >&2
+            exit 1
+          fi
+          echo "::add-mask::$bootstrap_token"
+          {
+            echo "token<<EOF"
+            printf '%s\n' "$bootstrap_token"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Codweft runner
+        env:
+          CODWEFT_BOOTSTRAP_TOKEN: ${{ steps.bootstrap.outputs.token }}
+        run: |
+          set -euo pipefail
+          bunx --yes "${{ inputs.runner_package }}"
