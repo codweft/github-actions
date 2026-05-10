@@ -48,7 +48,7 @@ on:
         description: "Pinned Codweft runner package spec"
         required: false
         type: string
-        default: "@codweft/runner@0.4.0"
+        default: "@codweft/runner@0.4.1"
     secrets:
       KIMI_API_KEY:
         required: false
