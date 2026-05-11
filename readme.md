@@ -7,7 +7,7 @@ repositories: `.github/workflows/codweft.yml`. That router calls
 `codweft-runner.yml` by tag.
 
 ```yaml
-uses: codweft/github-actions/.github/workflows/codweft-runner.yml@v0.4.1
+uses: codweft/github-actions/.github/workflows/codweft-runner.yml@v0.4.2
 ```
 
 ## Versioning
