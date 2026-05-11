@@ -126,4 +126,9 @@ jobs:
           CODWEFT_BOOTSTRAP_TOKEN: ${{ steps.bootstrap.outputs.token }}
         run: |
           set -euo pipefail
-          bunx --yes "${{ inputs.runner_package }}"
+          runner_dir=$(mktemp -d)
+          pushd "$runner_dir" >/dev/null
+          bun init -y >/dev/null
+          bun add "${{ inputs.runner_package }}"
+          node node_modules/@codweft/runner/dist/index.js
+          popd >/dev/null
