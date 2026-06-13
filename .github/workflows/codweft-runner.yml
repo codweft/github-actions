@@ -48,15 +48,7 @@ on:
         description: "Pinned Codweft runner package spec"
         required: false
         type: string
-        default: "@codweft/runner@0.4.4"
-    secrets:
-      KIMI_API_KEY:
-        required: false
-      ZAI_API_KEY:
-        required: false
-      MINIMAX_API_KEY:
-        required: false
-
+        default: "@codweft/runner@0.4.5"
 jobs:
   codweft:
     runs-on: ubuntu-latest
@@ -71,9 +63,6 @@ jobs:
       CODWEFT_JOB_ID: ${{ inputs.codweft_job_id }}
       CODWEFT_COMMAND_ID: ${{ inputs.codweft_command_id }}
       CODWEFT_BOOTSTRAP_NONCE: ${{ inputs.codweft_bootstrap_nonce }}
-      KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
-      ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
-      MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
     steps:
       - name: Install Bun
         uses: oven-sh/setup-bun@v2

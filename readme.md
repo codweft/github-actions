@@ -7,7 +7,7 @@ repositories: `.github/workflows/codweft.yml`. That router calls
 `codweft-runner.yml` by tag.
 
 ```yaml
-uses: codweft/github-actions/.github/workflows/codweft-runner.yml@v0.4.3
+uses: codweft/github-actions/.github/workflows/codweft-runner.yml@v0.4.5
 ```
 
 ## Versioning
@@ -23,8 +23,7 @@ to move a repository to a new runner workflow version.
 1. requests a short-lived Codweft bootstrap token using GitHub Actions OIDC;
 2. installs the pinned public `@codweft/runner` package;
 3. starts the package entrypoint with `CODWEFT_JOB_ID`, `CODWEFT_BOOTSTRAP_TOKEN`, and
-   `CODWEFT_API_URL`;
-4. passes configured model provider secrets through the environment.
+   `CODWEFT_API_URL`.
 
 The runner owns checkout, Pi setup, MCP configuration, model fallback,
-artifacts, and final result reporting.
+centralized provider-secret resolution, artifacts, and final result reporting.
