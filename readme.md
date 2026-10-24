@@ -7,7 +7,7 @@ destination repository. The temporary workflow calls `codweft-runner.yml` and
 is removed after the run; repositories do not keep a Codweft router workflow.
 
 ```yaml
-uses: codweft/github-actions/.github/workflows/codweft-runner.yml@v0.4.8
+uses: codweft/github-actions/.github/workflows/codweft-runner.yml@v0.4.9
 ```
 
 ## Versioning
