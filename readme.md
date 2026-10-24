@@ -16,6 +16,8 @@ This repository is published as semantic version tags. Generated temporary
 workflows pin the immutable commit SHA behind an approved release, never
 `@main` or a mutable tag.
 
+The workflow installs Node.js 24.22.1 and Bun 1.4.4, which include the October 2026 certificate trust fixes. The Node.js pin also satisfies the portable runner's minimum supported security release. Existing pinned consumers must select a new workflow release to receive these runtime updates.
+
 ## Workflow
 
 `codweft-runner.yml` does not contain mode-specific agent logic. It:
